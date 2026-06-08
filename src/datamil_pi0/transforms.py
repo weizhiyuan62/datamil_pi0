@@ -104,7 +104,7 @@ class RepackTransform:
 
     def __call__(self, data: dict) -> dict:
         flat_item = flatten_dict(data)
-        return tree_map(lambda key: flat_item[key], self.structure)
+        return tree_map(lambda key: _lookup_first(flat_item, key), self.structure)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -220,10 +220,16 @@ def make_libero_transforms(config: Pi0Config, norm_stats: dict[str, NormStats] |
     transforms: list[Callable[[dict], dict]] = [
         RepackTransform(
             {
-                "observation/image": "image",
-                "observation/wrist_image": "wrist_image",
-                "observation/state": "state",
-                "actions": "actions",
+                "observation/image": ("image", "observation.image", "observation/image", "observation.images.image", "observation/images/image"),
+                "observation/wrist_image": (
+                    "wrist_image",
+                    "observation.wrist_image",
+                    "observation/wrist_image",
+                    "observation.images.wrist_image",
+                    "observation/images/wrist_image",
+                ),
+                "observation/state": ("state", "observation.state", "observation/state"),
+                "actions": ("actions", "action"),
                 "prompt": "prompt",
             }
         ),
@@ -239,6 +245,15 @@ def make_libero_transforms(config: Pi0Config, norm_stats: dict[str, NormStats] |
         ]
     )
     return Compose(transforms)
+
+
+def _lookup_first(flat_item: dict[str, Any], key_or_keys):
+    keys = (key_or_keys,) if isinstance(key_or_keys, str) else tuple(key_or_keys)
+    for key in keys:
+        if key in flat_item:
+            return flat_item[key]
+    preview = ", ".join(sorted(flat_item.keys())[:20])
+    raise KeyError(f"None of {keys} found in sample. Available keys include: {preview}")
 
 
 def pad_to_dim(x: np.ndarray, target_dim: int, axis: int = -1, value: float = 0.0) -> np.ndarray:
@@ -279,4 +294,3 @@ def _parse_image(image) -> np.ndarray:
     if image.shape[0] == 3:
         image = np.transpose(image, (1, 2, 0))
     return image
-

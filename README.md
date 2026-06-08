@@ -19,6 +19,7 @@ src/datamil_pi0/
   transforms.py           # LIBERO observation/action transforms
 
 scripts/
+  download_libero_lerobot.py
   patch_transformers.py
   train_pi0_datamodel_libero.py
   train_pi0_selected_libero.py
@@ -56,7 +57,61 @@ python scripts/train_pi0_selected_libero.py --help
 
 ## Required Inputs
 
-Use LeRobot-format LIBERO datasets. The built-in configs define repo ids and dataset weights, but local roots default to `None`, so on H100 you normally pass both roots:
+Use LeRobot-format LIBERO datasets. The built-in configs define repo ids and dataset weights, but local roots default to `None`, so on H100 you normally pass both roots.
+
+### Recommended Data Path
+
+For your current LeRobot install, the simplest reproducible path is to download the LeRobot-formatted LIBERO data from Hugging Face instead of downloading raw LIBERO hdf5 and converting it yourself.
+
+Recommended dataset:
+
+```text
+nvidia/LIBERO_LeRobot_v3
+```
+
+It contains the LIBERO suites we need for the DataMIL setup:
+
+```text
+libero_90/
+libero_10/
+```
+
+Download only these two suites:
+
+```bash
+python scripts/download_libero_lerobot.py \
+  --repo-id nvidia/LIBERO_LeRobot_v3 \
+  --local-dir /data/libero/LIBERO_LeRobot_v3 \
+  --suites libero_90 libero_10
+```
+
+After download, use:
+
+```text
+/data/libero/LIBERO_LeRobot_v3/libero_90
+/data/libero/LIBERO_LeRobot_v3/libero_10
+```
+
+as the source and target roots.
+
+NVIDIA's LeRobot v3 data uses:
+
+```text
+observation.images.image
+observation.images.wrist_image
+observation.state
+action
+```
+
+The project transform accepts these fields. Because the action sequence key is `action` instead of the older `actions`, pass:
+
+```bash
+--action-key action
+```
+
+when using `nvidia/LIBERO_LeRobot_v3`.
+
+### Dataset Roots
 
 ```bash
 --roots /path/to/source_lerobot /path/to/target_lerobot
@@ -77,10 +132,13 @@ Default repo ids:
 If your repo ids differ from the config names, override them:
 
 ```bash
---repo-ids my_source_repo my_target_repo \
---roots /path/to/source_lerobot /path/to/target_lerobot \
+--repo-ids libero_90 libero_10 \
+--roots /data/libero/LIBERO_LeRobot_v3/libero_90 /data/libero/LIBERO_LeRobot_v3/libero_10 \
+--action-key action \
 --dataset-weights 0.5 0.5
 ```
+
+For strict single-target-task reproduction, make the second root a LeRobot dataset containing only that target task, matching the old `target_lerobot` setup. If you pass the full `libero_10` root, the target side will use all LIBERO-10 tasks for validation gradients and cotraining.
 
 The pi0 initializer expects a PyTorch checkpoint directory containing:
 
@@ -101,7 +159,9 @@ python scripts/train_pi0_datamodel_libero.py \
   --config-name libero_cotrain_l450_test_50_50 \
   --exp-name datamil_pi0_libero \
   --pytorch-weight-path /path/to/pi0_pytorch_checkpoint \
-  --roots /path/to/libero450traj_lerobot /path/to/target_lerobot \
+  --repo-ids libero_90 libero_10 \
+  --roots /data/libero/LIBERO_LeRobot_v3/libero_90 /data/libero/LIBERO_LeRobot_v3/libero_10 \
+  --action-key action \
   --batch-size 32 \
   --num-workers 8 \
   --inner-train-steps 10000 \
@@ -116,7 +176,9 @@ python scripts/train_pi0_datamodel_libero.py \
   --config-name libero_cotrain_l450_test_50_50 \
   --exp-name datamil_pi0_libero \
   --pytorch-weight-path /path/to/pi0_pytorch_checkpoint \
-  --roots /path/to/libero450traj_lerobot /path/to/target_lerobot \
+  --repo-ids libero_90 libero_10 \
+  --roots /data/libero/LIBERO_LeRobot_v3/libero_90 /data/libero/LIBERO_LeRobot_v3/libero_10 \
+  --action-key action \
   --batch-size 32 \
   --num-workers 8 \
   --inner-train-steps 10000 \
@@ -156,7 +218,9 @@ python scripts/train_pi0_selected_libero.py \
   --config-name libero_cotrain_l450_test_50_50 \
   --exp-name selected_pi0_libero \
   --pytorch-weight-path /path/to/pi0_pytorch_checkpoint \
-  --roots /path/to/libero450traj_lerobot /path/to/target_lerobot \
+  --repo-ids libero_90 libero_10 \
+  --roots /data/libero/LIBERO_LeRobot_v3/libero_90 /data/libero/LIBERO_LeRobot_v3/libero_10 \
+  --action-key action \
   --include-index-path checkpoints/libero_cotrain_l450_test_50_50/datamil_pi0_libero/datamil/iter_4/include_index.json \
   --batch-size 32 \
   --num-workers 8 \
@@ -173,7 +237,9 @@ python scripts/train_pi0_selected_libero.py \
   --datamodel-exp-name datamil_pi0_libero \
   --datamodel-job-id 4 \
   --pytorch-weight-path /path/to/pi0_pytorch_checkpoint \
-  --roots /path/to/libero450traj_lerobot /path/to/target_lerobot \
+  --repo-ids libero_90 libero_10 \
+  --roots /data/libero/LIBERO_LeRobot_v3/libero_90 /data/libero/LIBERO_LeRobot_v3/libero_10 \
+  --action-key action \
   --train-steps 10000
 ```
 
@@ -200,7 +266,9 @@ python scripts/run_pi0_libero_pipeline.py \
   --exp-name datamil_pi0_libero \
   --selected-exp-name selected_pi0_libero \
   --pytorch-weight-path /path/to/pi0_pytorch_checkpoint \
-  --roots /path/to/libero450traj_lerobot /path/to/target_lerobot \
+  --repo-ids libero_90 libero_10 \
+  --roots /data/libero/LIBERO_LeRobot_v3/libero_90 /data/libero/LIBERO_LeRobot_v3/libero_10 \
+  --action-key action \
   --job-id 0 \
   --num-iters 5 \
   --inner-train-steps 10000 \

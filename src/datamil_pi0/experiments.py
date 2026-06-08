@@ -26,6 +26,7 @@ class CommonOverrides:
     repo_ids: Sequence[str] | None = None
     roots: Sequence[str] | None = None
     dataset_weights: Sequence[float] | None = None
+    action_key: str | None = None
     asset_id: str | None = None
     batch_size: int | None = None
     num_workers: int | None = None
@@ -90,8 +91,11 @@ def make_config(overrides: CommonOverrides) -> TrainConfig:
             asset_id=asset_id,
             extra_delta_transform=data.extra_delta_transform,
             prompt_from_task=data.prompt_from_task,
-            action_sequence_keys=data.action_sequence_keys,
+            action_sequence_keys=(overrides.action_key,) if overrides.action_key is not None else data.action_sequence_keys,
         )
+        config = dataclasses.replace(config, data=data)
+    elif overrides.action_key is not None:
+        data = dataclasses.replace(data, action_sequence_keys=(overrides.action_key,))
         config = dataclasses.replace(config, data=data)
 
     config = with_overrides(

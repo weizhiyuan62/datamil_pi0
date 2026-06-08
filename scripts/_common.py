@@ -22,6 +22,7 @@ def add_common_args(parser: argparse.ArgumentParser, *, default_exp_name: str) -
     parser.add_argument("--repo-ids", nargs="+", default=None)
     parser.add_argument("--roots", nargs="+", default=None, help="Local LeRobot roots, one per repo id.")
     parser.add_argument("--dataset-weights", nargs="+", type=float, default=None)
+    parser.add_argument("--action-key", default=None, help="LeRobot action sequence key. Use 'action' for NVIDIA LIBERO_LeRobot_v3.")
     parser.add_argument("--asset-id", default=None)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--num-workers", type=int, default=None)
@@ -41,6 +42,7 @@ def common_overrides(args: argparse.Namespace) -> CommonOverrides:
         repo_ids=args.repo_ids,
         roots=args.roots,
         dataset_weights=args.dataset_weights,
+        action_key=args.action_key,
         asset_id=args.asset_id,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
