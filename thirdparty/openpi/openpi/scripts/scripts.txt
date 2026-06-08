@@ -1,0 +1,41 @@
+# 2026.05.29
+## target dataset
+python tmp/tmp_convert.py \
+--mds-root 'libero/datasets/mds/study_scene1_pick_up_the_book_and_place_it_in_the_back_compartment_of_the_caddy' \
+--repo-id 'target_lerobot' \
+--num-workers 2
+
+## full dataset
+python tmp/tmp_convert.py \
+--mds-root 'libero/datasets/mds/libero90' \
+--repo-id 'libero4500traj' \
+--num-workers 8
+
+## select by datamodel
+python tmp/tmp_convert.py \
+--mds-root 'libero/datasets/mds/libero90' \
+--repo-id 'libero450traj' \
+--selected-indices '/mnt/home/weizhiyuan/data/research_wzy/LIBERO/thirdparty/datamil/exp/2026-05-27/00-50-20/datamodels/libero90/book-caddy/selected_indices_topk0.1.npy' \
+--num-workers 8
+
+## select randomly to do ablation
+python tmp/tmp_convert.py \
+--mds-root 'libero/datasets/mds/libero90' \
+--repo-id 'libero450traj_random' \
+--selected-indices '/mnt/home/weizhiyuan/data/research_wzy/LIBERO/thirdparty/random_indice/random_indices.npy' \
+--num-workers 8
+
+uv run scripts/compute_norm_stats.py --config-name libero_cotrain_l450_test_50_50            # co-train 1
+uv run scripts/compute_norm_stats.py --config-name libero_cotrain_l450random_test_50_50      # co-train 2
+uv run scripts/compute_norm_stats.py --config-name libero_cotrain_l4500_test_50_50      # co-train 3
+
+XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 uv run scripts/train.py libero_cotrain_l450_test_50_50  --exp-name=exp_l450_target_0 --overwrite
+XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 uv run scripts/train.py libero_cotrain_l450random_test_50_50  --exp-name=exp_l450random_target_0 --overwrite
+XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 uv run scripts/train.py libero_cotrain_l4500_test_50_50  --exp-name=exp_l4500_target1 --overwrite
+
+## test
+uv run scripts/serve_policy.py \
+  --default_prompt 'pick up the book and place it in the back compartment of the caddy' \
+  policy:checkpoint \
+  --policy.config libero_cotrain_l450_test_50_50 \
+  --policy.dir checkpoints/libero_cotrain_l450_test_50_50/exp_l450_target_0/9999
