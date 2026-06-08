@@ -51,6 +51,11 @@ Install this workspace package in editable mode:
 pip install -e .
 ```
 
+Do not install the old octo/datamil dependency set. This workspace's root
+`pyproject.toml` is intentionally lightweight. If JAX is installed, it should
+come from openpi's own dependency graph, not from datamil-pi0 pinning an old JAX
+version.
+
 The PyTorch pi0 model in this openpi checkout expects the local
 `transformers_replace` patch to be copied into the installed `transformers`
 package:
@@ -215,4 +220,3 @@ roots and assets.
 - The local machine used for development did not have CUDA or torch installed,
   so only syntax and CLI help were checked locally. Full training should be
   tested on H100.
-
