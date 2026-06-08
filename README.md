@@ -20,9 +20,9 @@ octo/datamil usage:
   `include_index.json`.
 - `scripts/cotrain_pi0_libero.py`: compatibility wrapper for
   `scripts/select_pi0_libero_datamil.py`.
-- `thirdparty/openpi/openpi/`: trimmed openpi source tree used by the pi0
+- `thirdparty/openpi/`: trimmed openpi source tree used by the pi0
   adapter.
-- `thirdparty/openpi/openpi/assets/`: Libero normalization stats for the
+- `thirdparty/openpi/assets/`: Libero normalization stats for the
   existing openpi cotrain configs.
 
 ## Environment
@@ -40,15 +40,15 @@ pip install -U pip uv
 Install openpi dependencies:
 
 ```bash
-cd thirdparty/openpi/openpi
-uv pip install -e .
-cd ../../..
+cd thirdparty/openpi
+uv sync
+cd ../..
 ```
 
 Install this workspace package in editable mode:
 
 ```bash
-pip install -e .
+uv pip install -e .
 ```
 
 Do not install the old octo/datamil dependency set. This workspace's root
@@ -66,7 +66,7 @@ import pathlib
 import shutil
 import transformers
 
-repo = pathlib.Path("thirdparty/openpi/openpi/src/openpi/models_pytorch/transformers_replace")
+repo = pathlib.Path("thirdparty/openpi/src/openpi/models_pytorch/transformers_replace")
 dst = pathlib.Path(transformers.__file__).resolve().parent
 for item in repo.iterdir():
     target = dst / item.name
@@ -90,7 +90,7 @@ The default examples use openpi config
 `libero_cotrain_l450_test_50_50`, defined in:
 
 ```text
-thirdparty/openpi/openpi/src/openpi/training/config.py
+thirdparty/openpi/src/openpi/training/config.py
 ```
 
 That config currently points to local LeRobot-format Libero dataset roots. Before
@@ -100,7 +100,7 @@ dataset locations on the machine.
 The default assets path is:
 
 ```text
-thirdparty/openpi/openpi/assets
+thirdparty/openpi/assets
 ```
 
 You can override it with `--assets-base-dir`.

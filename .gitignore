@@ -18,11 +18,11 @@ tmp/
 tmp_cyx/
 exp/
 
-thirdparty/openpi/openpi/checkpoints/
-thirdparty/openpi/openpi/.cache/
-thirdparty/openpi/openpi/wandb/
-thirdparty/openpi/openpi/tmp/
-thirdparty/openpi/openpi/tmp_cyx/
-thirdparty/openpi/openpi/data/libero/videos/
+thirdparty/openpi/checkpoints/
+thirdparty/openpi/.cache/
+thirdparty/openpi/wandb/
+thirdparty/openpi/tmp/
+thirdparty/openpi/tmp_cyx/
+thirdparty/openpi/data/libero/videos/
 
 refer_dir/

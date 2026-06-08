@@ -35,7 +35,7 @@ def add_openpi_to_path(openpi_root: str | Path) -> Path:
 
 
 def add_common_pi0_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--openpi-root", default="thirdparty/openpi/openpi")
+    parser.add_argument("--openpi-root", default="thirdparty/openpi")
     parser.add_argument("--config-name", default="libero_cotrain_l450_test_50_50")
     parser.add_argument("--exp-name", default="datamil_pi0_libero")
     parser.add_argument("--assets-base-dir", default=None)
