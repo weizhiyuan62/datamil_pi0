@@ -50,6 +50,22 @@ python scripts/check_libero_lerobot.py \
 
 It should report present fields for `observation.images.image`, `observation.images.wrist_image`, `observation.state`, and `action`.
 
+## Compute Norm Stats
+
+Run this once for the actual `libero_90/libero_10` roots:
+
+```bash
+python scripts/compute_norm_stats_libero.py \
+  --config-name libero_cotrain_l450_test_50_50 \
+  --repo-ids libero_90 libero_10 \
+  --roots $SOURCE_ROOT $TARGET_ROOT \
+  --action-key action \
+  --batch-size 256 \
+  --num-workers 8
+```
+
+It writes the `norm_stats.json` used by the training scripts.
+
 ## Stage 1: Datamodel Selection
 
 Small smoke run first:
