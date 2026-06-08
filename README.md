@@ -79,20 +79,14 @@ libero_10/
 Download only these two suites:
 
 ```bash
+export SOURCE_ROOT=/mnt/home/weizhiyuan/data/research_wzy/datamil_pi0/storage/libero/LIBERO_LeRobot_v3
+
 python scripts/download_libero_lerobot.py \
   --repo-id nvidia/LIBERO_LeRobot_v3 \
-  --local-dir /data/libero/LIBERO_LeRobot_v3 \
+  --local-dir $SOURCE_ROOT \
   --suites libero_90 libero_10
 ```
 
-After download, use:
-
-```text
-/data/libero/LIBERO_LeRobot_v3/libero_90
-/data/libero/LIBERO_LeRobot_v3/libero_10
-```
-
-as the source and target roots.
 
 NVIDIA's LeRobot v3 data uses:
 
