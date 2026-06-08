@@ -32,7 +32,14 @@ export PI0_WEIGHT_PATH=/mnt/home/weizhiyuan/data/research_wzy/datamil_pi0/assets
 
 ## Check Data
 
-Run this before launching training:
+The downloaded NVIDIA v3 data may contain `meta/*.parquet` but not the `meta/*.jsonl` files expected by `lerobot==0.1.0`. Repair that once:
+
+```bash
+python scripts/repair_lerobot_v3_metadata.py \
+  --roots $SOURCE_ROOT $TARGET_ROOT
+```
+
+Then check the roots before launching training:
 
 ```bash
 python scripts/check_libero_lerobot.py \
