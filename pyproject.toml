@@ -20,11 +20,6 @@ dependencies = [
     "transformers==4.53.2",
 ]
 
-[project.scripts]
-datamil-pi0-select = "datamil_pi0.cli:select_main"
-datamil-pi0-train = "datamil_pi0.cli:train_main"
-datamil-pi0-patch-transformers = "datamil_pi0.cli:patch_transformers_main"
-
 [project.optional-dependencies]
 dev = [
     "pytest",
@@ -44,6 +39,7 @@ packages = ["src/datamil_pi0"]
 [tool.hatch.build.targets.sdist]
 include = [
     "/src/datamil_pi0",
+    "/scripts",
     "/README.md",
     "/LICENSE",
 ]

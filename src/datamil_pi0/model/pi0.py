@@ -113,7 +113,7 @@ class PI0Pytorch(nn.Module):
         # Initialize gradient checkpointing flag
         self.gradient_checkpointing_enabled = False
 
-        msg = "transformers_replace is not installed correctly. Run `datamil-pi0-patch-transformers` in this environment."
+        msg = "transformers_replace is not installed correctly. Run `python scripts/patch_transformers.py` in this environment."
         try:
             from transformers.models.siglip import check
 
