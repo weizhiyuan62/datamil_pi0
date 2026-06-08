@@ -30,19 +30,11 @@ scripts/
 Use Python 3.11.
 
 ```bash
-cd /path/to/datamil_pi0
+cd datamil_pi0
 uv sync
 source .venv/bin/activate
 ```
 
-Equivalent pip install:
-
-```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -U pip
-pip install -e .
-```
 
 Patch the installed `transformers` package once after creating the environment:
 
@@ -50,17 +42,10 @@ Patch the installed `transformers` package once after creating the environment:
 python scripts/patch_transformers.py
 ```
 
-The pi0 tokenizer needs `paligemma_tokenizer.model`. Either put it here:
+The pi0 tokenizer needs `paligemma_tokenizer.model`. put it here:
 
-```text
-src/datamil_pi0/assets/paligemma_tokenizer.model
-```
+> ./src/datamil_pi0/assets/paligemma_tokenizer.model
 
-or export:
-
-```bash
-export PALIGEMMA_TOKENIZER_PATH=/path/to/paligemma_tokenizer.model
-```
 
 Quick parser checks:
 
