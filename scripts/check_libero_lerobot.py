@@ -1,8 +1,11 @@
+# this script is used to check if the local LeRobot LIBERO roots are correctly set up before launching training.
+# if not, it will print out the missing keys and their shapes (if applicable) for debugging.
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 import sys
+import tqdm
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
@@ -36,7 +39,7 @@ def main() -> None:
 
     import lerobot.common.datasets.lerobot_dataset as lerobot_dataset
 
-    for repo_id, root in zip(args.repo_ids, args.roots, strict=True):
+    for repo_id, root in tqdm.tqdm(zip(args.repo_ids, args.roots, strict=True)):
         meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id, root=root)
         delta_timestamps = {args.action_key: [t / meta.fps for t in range(50)]}
         dataset = lerobot_dataset.LeRobotDataset(repo_id, root=root, delta_timestamps=delta_timestamps)

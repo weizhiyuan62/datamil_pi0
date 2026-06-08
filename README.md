@@ -22,18 +22,13 @@ src/datamil_pi0/assets/paligemma_tokenizer.model
 
 Set paths:
 
-```bash
+```zsh
 export DATA_ROOT=/mnt/home/weizhiyuan/data/research_wzy/datamil_pi0/storage/libero/LIBERO_LeRobot_v3
 export SOURCE_ROOT=$DATA_ROOT/libero_90
 export TARGET_ROOT=$DATA_ROOT/libero_10
-export PI0_WEIGHT_PATH=/path/to/pi0_pytorch_checkpoint
+export PI0_WEIGHT_PATH=/mnt/home/weizhiyuan/data/research_wzy/datamil_pi0/assets/pi0_droid_pytorch
 ```
-
-`PI0_WEIGHT_PATH` must contain:
-
-```text
-model.safetensors
-```
+> PI0_WEIGET_PATH should include a model.safetensor, which is the param used to init the pi0 model in the experiment
 
 ## Check Data
 
