@@ -5,16 +5,25 @@ build-backend = "hatchling.build"
 [project]
 name = "datamil-pi0"
 version = "0.1.0"
-description = "DataMIL-style data selection for openpi pi0 in PyTorch"
+description = "PyTorch pi0 DataMIL data selection and selected-data training"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
 dependencies = [
+    "einops>=0.8.0",
+    "lerobot @ git+https://github.com/huggingface/lerobot@0cf864870cf29f4738d3ade893e6fd13fbd7cdb5",
     "numpy>=1.22.4,<2.0.0",
     "safetensors>=0.4.0",
-    "torch>=2.7.1",
+    "sentencepiece>=0.2.0",
+    "torch==2.7.1",
     "tqdm>=4.60.0",
+    "transformers==4.53.2",
 ]
+
+[project.scripts]
+datamil-pi0-select = "datamil_pi0.cli:select_main"
+datamil-pi0-train = "datamil_pi0.cli:train_main"
+datamil-pi0-patch-transformers = "datamil_pi0.cli:patch_transformers_main"
 
 [project.optional-dependencies]
 dev = [
@@ -22,13 +31,19 @@ dev = [
     "ruff",
 ]
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
-packages = ["datamil"]
+packages = ["src/datamil_pi0"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/datamil_pi0/assets" = "datamil_pi0/assets"
+"src/datamil_pi0/model/transformers_replace" = "datamil_pi0/model/transformers_replace"
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "/datamil",
-    "/scripts",
+    "/src/datamil_pi0",
     "/README.md",
     "/LICENSE",
 ]
@@ -36,4 +51,3 @@ include = [
 [tool.ruff]
 line-length = 120
 target-version = "py311"
-
