@@ -22,7 +22,7 @@ def add_common_args(parser: argparse.ArgumentParser, *, default_exp_name: str) -
     parser.add_argument("--repo-ids", nargs="+", default=None)
     parser.add_argument("--roots", nargs="+", default=None, help="Local LeRobot roots, one per repo id.")
     parser.add_argument("--dataset-weights", nargs="+", type=float, default=None)
-    parser.add_argument("--action-key", default=None, help="LeRobot action sequence key. Use 'action' for NVIDIA LIBERO_LeRobot_v3.")
+    parser.add_argument("--action-key", default=None, help="LeRobot action sequence key. Official conversion uses 'action'.")
     parser.add_argument("--asset-id", default=None)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--num-workers", type=int, default=None)

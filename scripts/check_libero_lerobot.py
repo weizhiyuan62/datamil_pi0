@@ -24,6 +24,13 @@ def flatten_dict(tree: dict, prefix: str = "") -> dict:
     return out
 
 
+def lookup_present(flat: dict, keys: tuple[str, ...]) -> tuple[str | None, object | None]:
+    for key in keys:
+        if key in flat:
+            return key, flat[key]
+    return None, None
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Check local LeRobot LIBERO roots before launching training.")
     parser.add_argument("--repo-ids", nargs="+", required=True)
@@ -50,16 +57,17 @@ def main() -> None:
         print(f"num_frames: {len(dataset)}")
         print(f"fps: {meta.fps}")
         print(f"num_tasks: {len(getattr(meta, 'tasks', {}))}")
-        for key in [
-            "observation.images.image",
-            "observation.images.wrist_image",
-            "observation.state",
-            args.action_key,
-            "task_index",
+        for label, keys in [
+            ("image", ("image", "observation.images.image", "observation/image", "observation.images.image")),
+            ("wrist_image", ("wrist_image", "observation.images.wrist_image", "observation/wrist_image")),
+            ("state", ("state", "observation.state", "observation/state")),
+            ("action", (args.action_key, "action", "actions")),
+            ("task_index", ("task_index",)),
         ]:
-            value = flat.get(key)
+            found_key, value = lookup_present(flat, keys)
             shape = getattr(value, "shape", None)
-            print(f"{key}: {'present' if key in flat else 'missing'}" + (f", shape={tuple(shape)}" if shape is not None else ""))
+            status = f"present as {found_key}" if found_key is not None else "missing"
+            print(f"{label}: {status}" + (f", shape={tuple(shape)}" if shape is not None else ""))
 
 
 if __name__ == "__main__":
