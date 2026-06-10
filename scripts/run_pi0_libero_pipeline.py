@@ -30,6 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-repo-index", type=int, default=-1)
     parser.add_argument("--inner-train-steps", type=int, default=None)
     parser.add_argument("--bob-steps", type=int, default=100)
+    parser.add_argument("--segment-size", type=int, default=25)
     parser.add_argument("--val-steps", type=int, default=32)
     parser.add_argument("--candidate-batches", type=int, default=None)
     parser.add_argument("--candidate-size", type=float, default=1.0)
@@ -62,6 +63,7 @@ def main() -> None:
                 val_repo_index=args.val_repo_index,
                 inner_train_steps=args.inner_train_steps,
                 bob_steps=args.bob_steps,
+                segment_size=args.segment_size,
                 val_steps=args.val_steps,
                 candidate_batches=args.candidate_batches,
                 candidate_size=args.candidate_size,

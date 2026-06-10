@@ -169,8 +169,10 @@ class IndexedPi0Loader:
 
 
 class WeightedPi0TrainLoader:
-    def __init__(self, loader):
+    def __init__(self, loader, dataset=None, batch_size: int | None = None):
         self._loader = loader
+        self._dataset = dataset
+        self._batch_size = batch_size
 
     def __iter__(self):
         while True:
@@ -178,6 +180,17 @@ class WeightedPi0TrainLoader:
                 batch = tree_map(torch.as_tensor, batch)
                 indices = batch.pop("__datamil_index__").to(torch.long)
                 yield Observation.from_dict(batch), batch["actions"], indices
+
+    def batch_at(self, batch_index: int) -> tuple[Observation, torch.Tensor, torch.Tensor]:
+        if self._dataset is None or self._batch_size is None:
+            raise ValueError("This loader was not created with deterministic batch_at support.")
+        start = int(batch_index) * self._batch_size
+        end = start + self._batch_size
+        dataset_len = len(self._dataset)
+        batch = collate_fn([self._dataset[i % dataset_len] for i in range(start, end)])
+        batch = tree_map(torch.as_tensor, batch)
+        indices = batch.pop("__datamil_index__").to(torch.long)
+        return Observation.from_dict(batch), batch["actions"], indices
 
 
 class Pi0TrainLoader:
@@ -344,4 +357,4 @@ def create_weighted_mixed_train_loader(
         collate_fn=collate_fn,
         generator=torch.Generator().manual_seed(seed),
     )
-    return WeightedPi0TrainLoader(torch_loader)
+    return WeightedPi0TrainLoader(torch_loader, dataset=mixed, batch_size=batch_size)

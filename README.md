@@ -127,6 +127,7 @@ python scripts/train_pi0_datamodel_libero.py \
   --val-steps 1 \
   --candidate-batches 1 \
   --bob-steps 1 \
+  --segment-size 1 \
   --job-id 0
 ```
 
@@ -144,6 +145,7 @@ python scripts/train_pi0_datamodel_libero.py \
   --num-workers 8 \
   --inner-train-steps 10000 \
   --bob-steps 100 \
+  --segment-size 25 \
   --val-steps 32 \
   --job-id 0 \
   --num-iters 5

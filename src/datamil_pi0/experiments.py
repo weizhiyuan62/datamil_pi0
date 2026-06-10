@@ -45,6 +45,7 @@ class DatamodelSelectionArgs:
     val_repo_index: int = -1
     inner_train_steps: int | None = None
     bob_steps: int = 100
+    segment_size: int = 25
     val_steps: int = 32
     candidate_batches: int | None = None
     candidate_size: float = 1.0
@@ -196,9 +197,9 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
         json.dump(
             {
                 "stage": "pi0_datamodel_selection",
-                "datamodel_estimator": "pytorch_unrolled_data_weight_metagradient",
+                "datamodel_estimator": "pytorch_replay_vjp_data_weight_metagradient",
                 "matches_octo_data_weight_objective": True,
-                "memory_engine": "autograd_unroll_not_okazaki_replay",
+                "memory_engine": "pytorch_segmented_replay_vjp",
                 "score_definition": "d(target_validation_loss_after_inner_training)/d(candidate_episode_weight)",
                 "config_name": args.common.config_name,
                 "selection_unit": "episode",
@@ -207,6 +208,7 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
                 "num_selected_before": len(selected_indices),
                 "num_candidates": len(scored_indices),
                 "bob_steps": args.bob_steps,
+                "segment_size": args.segment_size,
                 "include_index_path": include_index_path,
                 "norm_stats_path": norm_stats_path,
             },
@@ -254,6 +256,7 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
         device=device,
         inner_train_steps=inner_steps,
         bob_steps=args.bob_steps,
+        segment_size=args.segment_size,
         val_steps=args.val_steps,
         candidate_batches=args.candidate_batches,
     )
