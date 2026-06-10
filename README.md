@@ -131,6 +131,28 @@ python scripts/train_pi0_datamodel_libero.py \
   --job-id 0
 ```
 
+450-episode subset run:
+
+```bash
+python scripts/train_pi0_datamodel_libero_450.py \
+  --config-name libero_cotrain_l450_test_50_50 \
+  --exp-name datamil_pi0_libero_l450_debug \
+  --pytorch-weight-path $PI0_WEIGHT_PATH \
+  --repo-ids libero90_lerobot libero10_lerobot \
+  --roots $SOURCE_ROOT $TARGET_ROOT \
+  --action-key action \
+  --num-source-episodes 450 \
+  --episode-seed 42 \
+  --batch-size 8 \
+  --num-workers 4 \
+  --inner-train-steps 100 \
+  --bob-steps 10 \
+  --segment-size 5 \
+  --val-steps 4 \
+  --candidate-batches 4 \
+  --job-id 0
+```
+
 Full run:
 
 ```bash

@@ -42,6 +42,7 @@ class DatamodelSelectionArgs:
     job_id: int = 0
     output_dir: str | None = None
     include_index_path: str | None = None
+    episode_indices: Sequence[int] | None = None
     val_repo_index: int = -1
     inner_train_steps: int | None = None
     bob_steps: int = 100
@@ -174,7 +175,12 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
     device = torch_device(args.common.device)
 
     selection_dataset = create_raw_lerobot_dataset(config, args.common.selection_repo_index)
-    episode_ids = sorted(build_episode_index(selection_dataset))
+    all_episode_ids = sorted(build_episode_index(selection_dataset))
+    episode_ids = [int(i) for i in args.episode_indices] if args.episode_indices is not None else all_episode_ids
+    valid_episode_ids = set(all_episode_ids)
+    unknown_episode_ids = [i for i in episode_ids if i not in valid_episode_ids]
+    if unknown_episode_ids:
+        raise ValueError(f"Unknown episode ids in subset: {unknown_episode_ids[:10]}")
     num_episodes = len(episode_ids)
     if args.include_index_path is not None:
         include_index_path = args.include_index_path
@@ -193,6 +199,21 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
     output_dir = datamodel_iter_dir(config, job_id=args.job_id, output_dir=args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     norm_stats_path = copy_norm_stats_for_run(config, output_dir)
+    episode_subset_path = None
+    if args.episode_indices is not None:
+        episode_subset_path = output_dir / "episode_subset.json"
+        with open(episode_subset_path, "w") as f:
+            json.dump(
+                {
+                    "unit": "episode",
+                    "source_repo_index": args.common.selection_repo_index,
+                    "episode_indices": episode_ids,
+                    "num_episode_indices": len(episode_ids),
+                    "num_source_episodes_total": len(all_episode_ids),
+                },
+                f,
+                indent=2,
+            )
     with open(output_dir / "run_info.json", "w") as f:
         json.dump(
             {
@@ -204,12 +225,14 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
                 "config_name": args.common.config_name,
                 "selection_unit": "episode",
                 "num_frames": len(selection_dataset),
-                "num_episodes": num_episodes,
+                "num_source_episodes_total": len(all_episode_ids),
+                "num_episode_universe": num_episodes,
                 "num_selected_before": len(selected_indices),
                 "num_candidates": len(scored_indices),
                 "bob_steps": args.bob_steps,
                 "segment_size": args.segment_size,
                 "include_index_path": include_index_path,
+                "episode_subset_path": None if episode_subset_path is None else str(episode_subset_path),
                 "norm_stats_path": norm_stats_path,
             },
             f,
