@@ -128,19 +128,62 @@ class RunningStats:
 
 
 class StatsDataset:
-    def __init__(self, dataset, *, action_key: str):
+    def __init__(
+        self,
+        dataset,
+        *,
+        action_key: str,
+        extra_delta_transform: bool,
+        indices: list[int] | None = None,
+    ):
         self.dataset = dataset
         self.action_key = action_key
+        self.extra_delta_transform = extra_delta_transform
+        self.indices = list(range(len(dataset))) if indices is None else [int(i) for i in indices]
 
     def __len__(self):
-        return len(self.dataset)
+        return len(self.indices)
 
     def __getitem__(self, index: int) -> dict[str, np.ndarray]:
-        flat = flatten_dict(self.dataset[index])
-        return {
-            "state": lookup_first(flat, ("state", "observation.state", "observation/state")),
-            "actions": lookup_first(flat, (self.action_key, "actions", "action")),
-        }
+        flat = flatten_dict(self.dataset[self.indices[index]])
+        state = lookup_first(flat, ("state", "observation.state", "observation/state"))
+        actions = lookup_first(flat, (self.action_key, "actions", "action"))
+        if self.extra_delta_transform:
+            actions = actions.copy()
+            actions[..., :6] -= state[..., :6][None, :]
+        return {"state": state, "actions": actions}
+
+    def subset(self, indices: list[int]) -> "StatsDataset":
+        return StatsDataset(
+            self.dataset,
+            action_key=self.action_key,
+            extra_delta_transform=self.extra_delta_transform,
+            indices=indices,
+        )
+
+
+def scalar_int(value) -> int:
+    array = to_numpy(value)
+    if array.shape == ():
+        return int(array.item())
+    return int(array.reshape(-1)[0])
+
+
+def episode_to_frame_indices(dataset) -> dict[int, list[int]]:
+    episode_data_index = getattr(dataset, "episode_data_index", None)
+    if isinstance(episode_data_index, dict) and "from" in episode_data_index and "to" in episode_data_index:
+        starts = to_numpy(episode_data_index["from"]).reshape(-1)
+        ends = to_numpy(episode_data_index["to"]).reshape(-1)
+        return {episode: list(range(int(start), int(end))) for episode, (start, end) in enumerate(zip(starts, ends, strict=True))}
+
+    episodes: dict[int, list[int]] = {}
+    for frame_index in range(len(dataset)):
+        flat = flatten_dict(dataset[frame_index])
+        if "episode_index" not in flat:
+            raise KeyError("Dataset does not expose episode_data_index or per-sample episode_index.")
+        episode = scalar_int(flat["episode_index"])
+        episodes.setdefault(episode, []).append(frame_index)
+    return dict(sorted(episodes.items()))
 
 
 def parse_args() -> argparse.Namespace:
@@ -154,8 +197,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--action-horizon", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--num-workers", type=int, default=8)
+    parser.add_argument("--num-episodes", type=int, default=30, help="Sample this many episodes across all input datasets.")
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-frames", type=int, default=None)
     parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--extra-delta-transform", action="store_true", help="Compute action stats after LIBERO delta-action conversion.")
     return parser.parse_args()
 
 
@@ -171,13 +217,13 @@ def make_config(args):
     return config
 
 
-def create_dataset(repo_id: str, root: str, *, action_key: str, action_horizon: int):
+def create_dataset(repo_id: str, root: str, *, action_key: str, action_horizon: int, extra_delta_transform: bool):
     import lerobot.common.datasets.lerobot_dataset as lerobot_dataset
 
     meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id, root=root)
     delta_timestamps = {action_key: [t / meta.fps for t in range(action_horizon)]}
     dataset = lerobot_dataset.LeRobotDataset(repo_id, root=root, delta_timestamps=delta_timestamps)
-    return StatsDataset(dataset, action_key=action_key)
+    return StatsDataset(dataset, action_key=action_key, extra_delta_transform=extra_delta_transform)
 
 
 def collate(items):
@@ -196,13 +242,54 @@ def main() -> None:
     import tqdm
 
     config = make_config(args)
+    extra_delta_transform = bool(config.data.extra_delta_transform or args.extra_delta_transform)
     stats = {"state": RunningStats(), "actions": RunningStats()}
     seen_frames = 0
+    datasets = []
+    candidate_episodes = []
 
     for repo_id, root in zip(args.repo_ids, args.roots, strict=True):
-        dataset = create_dataset(repo_id, root, action_key=args.action_key, action_horizon=args.action_horizon)
+        dataset = create_dataset(
+            repo_id,
+            root,
+            action_key=args.action_key,
+            action_horizon=args.action_horizon,
+            extra_delta_transform=extra_delta_transform,
+        )
+        dataset_index = len(datasets)
+        datasets.append((repo_id, dataset))
+        for episode, frame_indices in episode_to_frame_indices(dataset.dataset).items():
+            candidate_episodes.append((dataset_index, int(episode), frame_indices))
+
+    if not candidate_episodes:
+        raise ValueError("No episodes found in the input datasets.")
+    if args.num_episodes <= 0:
+        raise ValueError("--num-episodes must be positive.")
+
+    rng = np.random.default_rng(args.seed)
+    sample_count = min(args.num_episodes, len(candidate_episodes))
+    selected_positions = sorted(rng.choice(len(candidate_episodes), size=sample_count, replace=False).astype(int).tolist())
+    selected_by_dataset: dict[int, list[int]] = {}
+    selected_episode_summary = []
+    for position in selected_positions:
+        dataset_index, episode, frame_indices = candidate_episodes[position]
+        selected_by_dataset.setdefault(dataset_index, []).extend(frame_indices)
+        selected_episode_summary.append(
+            {
+                "repo_id": datasets[dataset_index][0],
+                "episode_index": episode,
+                "num_frames": len(frame_indices),
+            }
+        )
+
+    print(f"Sampled {sample_count} / {len(candidate_episodes)} episodes for norm stats with seed={args.seed}")
+    for dataset_index, (repo_id, dataset) in enumerate(datasets):
+        selected_frames = sorted(set(selected_by_dataset.get(dataset_index, [])))
+        if not selected_frames:
+            continue
+        selected_dataset = dataset.subset(selected_frames)
         loader = torch.utils.data.DataLoader(
-            dataset,
+            selected_dataset,
             batch_size=args.batch_size,
             shuffle=False,
             num_workers=args.num_workers,
@@ -211,7 +298,7 @@ def main() -> None:
         remaining = None if args.max_frames is None else max(0, args.max_frames - seen_frames)
         if remaining == 0:
             break
-        total = len(dataset) if remaining is None else min(len(dataset), remaining)
+        total = len(selected_dataset) if remaining is None else min(len(selected_dataset), remaining)
         pbar = tqdm.tqdm(loader, desc=f"stats {repo_id}", total=max(1, (total + args.batch_size - 1) // args.batch_size))
         for batch in pbar:
             if args.max_frames is not None:
@@ -225,7 +312,15 @@ def main() -> None:
             if args.max_frames is not None and seen_frames >= args.max_frames:
                 break
 
-    payload = {"norm_stats": {key: value.get_statistics() for key, value in stats.items()}}
+    payload = {
+        "sampled_episode_stats": {
+            "num_episodes": sample_count,
+            "num_candidate_episodes": len(candidate_episodes),
+            "seed": args.seed,
+            "selected_episodes": selected_episode_summary,
+        },
+        "norm_stats": {key: value.get_statistics() for key, value in stats.items()},
+    }
     output_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else config.norm_stats_path.parent
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / "norm_stats.json"

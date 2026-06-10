@@ -44,6 +44,7 @@ class DatamodelSelectionArgs:
     include_index_path: str | None = None
     val_repo_index: int = -1
     inner_train_steps: int | None = None
+    bob_steps: int = 100
     val_steps: int = 32
     candidate_batches: int | None = None
     candidate_size: float = 1.0
@@ -144,20 +145,27 @@ def torch_device(requested: str):
     return torch.device(requested if torch.cuda.is_available() or requested == "cpu" else "cpu")
 
 
+def copy_norm_stats_for_run(config: TrainConfig, output_dir: Path) -> str:
+    from datamil_pi0.transforms import load_norm_stats
+    from datamil_pi0.transforms import save_norm_stats
+
+    norm_stats_path = config.norm_stats_path
+    norm_stats = load_norm_stats(norm_stats_path)
+    save_norm_stats(output_dir / "assets" / config.data.asset_id, norm_stats)
+    return str(norm_stats_path)
+
+
 def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
     import torch
 
     from datamil_pi0.data import create_indexed_loader
-    from datamil_pi0.data import create_mixed_train_loader
     from datamil_pi0.data import create_raw_lerobot_dataset
+    from datamil_pi0.data import create_weighted_mixed_train_loader
     from datamil_pi0.data import build_episode_index
-    from datamil_pi0.modeling import make_lr_schedule
     from datamil_pi0.modeling import make_pi0_pytorch_model
-    from datamil_pi0.modeling import train_steps
-    from datamil_pi0.selection import compute_reference_grad
+    from datamil_pi0.metagradients import strict_datamodel_scores
     from datamil_pi0.selection import load_include_indices
     from datamil_pi0.selection import save_outputs
-    from datamil_pi0.selection import score_candidates
     from datamil_pi0.selection import scores_to_array
     from datamil_pi0.selection import select_by_percentile
 
@@ -183,43 +191,42 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
     )
     output_dir = datamodel_iter_dir(config, job_id=args.job_id, output_dir=args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    norm_stats_path = copy_norm_stats_for_run(config, output_dir)
     with open(output_dir / "run_info.json", "w") as f:
         json.dump(
             {
                 "stage": "pi0_datamodel_selection",
+                "datamodel_estimator": "pytorch_unrolled_data_weight_metagradient",
+                "matches_octo_data_weight_objective": True,
+                "memory_engine": "autograd_unroll_not_okazaki_replay",
+                "score_definition": "d(target_validation_loss_after_inner_training)/d(candidate_episode_weight)",
                 "config_name": args.common.config_name,
                 "selection_unit": "episode",
                 "num_frames": len(selection_dataset),
                 "num_episodes": num_episodes,
                 "num_selected_before": len(selected_indices),
                 "num_candidates": len(scored_indices),
+                "bob_steps": args.bob_steps,
                 "include_index_path": include_index_path,
+                "norm_stats_path": norm_stats_path,
             },
             f,
             indent=2,
         )
 
     model = make_pi0_pytorch_model(config, device)
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=config.lr_schedule.peak_lr,
-        betas=(config.optimizer.b1, config.optimizer.b2),
-        eps=config.optimizer.eps,
-        weight_decay=config.optimizer.weight_decay,
-    )
-
     inner_steps = config.num_train_steps if args.inner_train_steps is None else args.inner_train_steps
-    if not args.no_inner_train and inner_steps > 0:
-        train_loader = create_mixed_train_loader(
-            config,
-            selection_repo_index=args.common.selection_repo_index,
-            selected_indices=selected_indices,
-            batch_size=config.batch_size,
-            shuffle=True,
-            seed=config.seed + args.job_id,
-        )
-        train_steps(model, train_loader, optimizer, device, num_steps=inner_steps, lr_schedule=make_lr_schedule(config))
+    if args.no_inner_train:
+        inner_steps = 0
 
+    train_loader = create_weighted_mixed_train_loader(
+        config,
+        selection_repo_index=args.common.selection_repo_index,
+        selected_indices=selected_indices,
+        batch_size=config.batch_size,
+        shuffle=True,
+        seed=config.seed + args.job_id,
+    )
     val_loader = create_indexed_loader(
         config,
         repo_index=args.val_repo_index,
@@ -228,7 +235,6 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
         shuffle=False,
         seed=config.seed,
     )
-    reference_grad = compute_reference_grad(model, val_loader, device, val_steps=args.val_steps)
     candidate_loader = create_indexed_loader(
         config,
         repo_index=args.common.selection_repo_index,
@@ -237,7 +243,20 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
         shuffle=False,
         seed=config.seed + args.job_id,
     )
-    score_dict = score_candidates(model, candidate_loader, reference_grad, device, max_batches=args.candidate_batches)
+    score_dict = strict_datamodel_scores(
+        model=model,
+        config=config,
+        train_loader=train_loader,
+        candidate_loader=candidate_loader,
+        val_loader=val_loader,
+        selected_episode_indices=selected_indices,
+        candidate_episode_indices=scored_indices,
+        device=device,
+        inner_train_steps=inner_steps,
+        bob_steps=args.bob_steps,
+        val_steps=args.val_steps,
+        candidate_batches=args.candidate_batches,
+    )
     scores = scores_to_array(score_dict, episode_ids)
     selected_after = select_by_percentile(
         scores,
@@ -273,6 +292,7 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
     if output_dir.exists() and args.overwrite:
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    norm_stats_path = copy_norm_stats_for_run(config, output_dir)
 
     selection_dataset = create_raw_lerobot_dataset(config, args.common.selection_repo_index)
     episode_ids = sorted(build_episode_index(selection_dataset))
@@ -286,6 +306,7 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
                 "num_source_episodes": len(episode_ids),
                 "include_index_path": str(Path(args.include_index_path).expanduser().resolve()),
                 "num_selected": len(selected_indices),
+                "norm_stats_path": norm_stats_path,
             },
             f,
             indent=2,

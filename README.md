@@ -99,13 +99,17 @@ python scripts/compute_norm_stats_libero.py \
   --repo-ids libero90_lerobot libero10_lerobot \
   --roots $SOURCE_ROOT $TARGET_ROOT \
   --action-key action \
+  --num-episodes 30 \
+  --seed 42 \
   --batch-size 256 \
   --num-workers 8
 ```
 
-It writes the `norm_stats.json` used by training.
+It samples 30 episodes across all input datasets and writes the `norm_stats.json` used by training.
 
 ## Stage 1: Datamodel Selection
+
+pi0 DataMIL uses the same data-weight metagradient objective as the Octo implementation: selected source episodes train with weight 1, candidate source episodes enter the inner trajectory with weight 0, and `datamodels.npy` stores `d(target_validation_loss) / d(candidate_episode_weight)`.
 
 Smoke first:
 
@@ -122,6 +126,7 @@ python scripts/train_pi0_datamodel_libero.py \
   --no-inner-train \
   --val-steps 1 \
   --candidate-batches 1 \
+  --bob-steps 1 \
   --job-id 0
 ```
 
@@ -138,6 +143,7 @@ python scripts/train_pi0_datamodel_libero.py \
   --batch-size 32 \
   --num-workers 8 \
   --inner-train-steps 10000 \
+  --bob-steps 100 \
   --val-steps 32 \
   --job-id 0 \
   --num-iters 5

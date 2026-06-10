@@ -6,11 +6,6 @@ from pathlib import Path
 from typing import Sequence
 
 import numpy as np
-import torch
-
-from datamil_pi0.data import tree_to_device
-from datamil_pi0.modeling import loss_grad_vector
-from datamil_pi0.modeling import per_sample_loss
 
 
 def _available_indices(available: int | Sequence[int]) -> list[int]:
@@ -40,37 +35,6 @@ def load_include_indices(path: str | None, available: int | Sequence[int]) -> li
 def save_include_indices(path: str | os.PathLike, indices: Sequence[int]) -> None:
     with open(path, "w") as f:
         json.dump({"version": 2, "unit": "episode", "episode_indices": [int(i) for i in indices]}, f, indent=2)
-
-
-def compute_reference_grad(model, val_loader, device, *, val_steps: int) -> torch.Tensor:
-    grads = []
-    iterator = val_loader.one_pass()
-    for step, (observation, actions, _) in enumerate(iterator):
-        if step >= val_steps:
-            break
-        observation = tree_to_device(observation, device)
-        actions = actions.to(device=device, dtype=torch.float32)
-        loss = per_sample_loss(model, observation, actions).mean()
-        grads.append(loss_grad_vector(model, loss).cpu())
-    if not grads:
-        raise ValueError("No validation batches were produced.")
-    return torch.stack(grads, dim=0).mean(dim=0).to(device)
-
-
-def score_candidates(model, candidate_loader, reference_grad, device, *, max_batches: int | None = None) -> dict[int, float]:
-    scores: dict[int, float] = {}
-    for batch_idx, (observation, actions, indices) in enumerate(candidate_loader.one_pass()):
-        if max_batches is not None and batch_idx >= max_batches:
-            break
-        observation = tree_to_device(observation, device)
-        actions = actions.to(device=device, dtype=torch.float32)
-        indices = indices.cpu().numpy()
-        losses = per_sample_loss(model, observation, actions)
-        for row, episode_index in enumerate(indices):
-            grad = loss_grad_vector(model, losses[row], retain_graph=row < len(indices) - 1)
-            score = float(-torch.dot(reference_grad, grad).detach().cpu())
-            scores[int(episode_index)] = scores.get(int(episode_index), 0.0) + score
-    return scores
 
 
 def scores_to_array(scores: dict[int, float], available: int | Sequence[int]) -> np.ndarray:

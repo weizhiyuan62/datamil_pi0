@@ -16,7 +16,7 @@ from datamil_pi0.experiments import run_datamodel_selection  # noqa: E402
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Train pi0 datamodels on Libero and write datamodels.npy/include_index.json.",
+        description="Train pi0 DataMIL datamodels on LIBERO and write datamodels.npy/include_index.json.",
     )
     add_common_args(parser, default_exp_name="datamil_pi0_libero")
     parser.add_argument("--job-id", type=int, default=0, help="First datamodel iteration id.")
@@ -25,6 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--include-index-path", default=None, help="Initial include_index.json. Only used for the first iteration.")
     parser.add_argument("--val-repo-index", type=int, default=-1, help="Repo index used to compute the reference gradient.")
     parser.add_argument("--inner-train-steps", type=int, default=None)
+    parser.add_argument("--bob-steps", type=int, default=100, help="Number of tail steps after the zero-weight candidate step.")
     parser.add_argument("--val-steps", type=int, default=32)
     parser.add_argument("--candidate-batches", type=int, default=None)
     parser.add_argument("--candidate-size", type=float, default=1.0)
@@ -48,6 +49,7 @@ def main() -> None:
             include_index_path=include_index_path,
             val_repo_index=args.val_repo_index,
             inner_train_steps=args.inner_train_steps,
+            bob_steps=args.bob_steps,
             val_steps=args.val_steps,
             candidate_batches=args.candidate_batches,
             candidate_size=args.candidate_size,
