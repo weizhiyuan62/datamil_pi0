@@ -127,14 +127,14 @@ def default_include_index_path(common: CommonOverrides, *, datamodel_exp_name: s
     return datamodel_iter_dir(config, job_id=job_id, output_dir=output_dir) / "include_index.json"
 
 
-def candidate_indices(dataset_len: int, *, candidate_size: float, seed: int, job_id: int) -> list[int]:
-    all_indices = np.arange(dataset_len)
+def candidate_indices(available_indices: Sequence[int], *, candidate_size: float, seed: int, job_id: int) -> list[int]:
+    all_indices = np.asarray([int(i) for i in available_indices], dtype=np.int64)
     if candidate_size >= 1.0:
         return all_indices.tolist()
     if candidate_size <= 0.0:
         raise ValueError("--candidate-size must be in (0, 1].")
     rng = np.random.default_rng(seed + job_id)
-    num = max(1, int(round(dataset_len * candidate_size)))
+    num = max(1, int(round(len(all_indices) * candidate_size)))
     return sorted(rng.choice(all_indices, size=num, replace=False).astype(int).tolist())
 
 
@@ -150,6 +150,7 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
     from datamil_pi0.data import create_indexed_loader
     from datamil_pi0.data import create_mixed_train_loader
     from datamil_pi0.data import create_raw_lerobot_dataset
+    from datamil_pi0.data import build_episode_index
     from datamil_pi0.modeling import make_lr_schedule
     from datamil_pi0.modeling import make_pi0_pytorch_model
     from datamil_pi0.modeling import train_steps
@@ -164,7 +165,8 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
     device = torch_device(args.common.device)
 
     selection_dataset = create_raw_lerobot_dataset(config, args.common.selection_repo_index)
-    dataset_len = len(selection_dataset)
+    episode_ids = sorted(build_episode_index(selection_dataset))
+    num_episodes = len(episode_ids)
     if args.include_index_path is not None:
         include_index_path = args.include_index_path
     elif args.job_id > 0:
@@ -172,9 +174,9 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
     else:
         include_index_path = None
 
-    selected_indices = load_include_indices(include_index_path, dataset_len)
+    selected_indices = load_include_indices(include_index_path, episode_ids)
     scored_indices = candidate_indices(
-        dataset_len,
+        episode_ids,
         candidate_size=args.candidate_size,
         seed=config.seed,
         job_id=args.job_id,
@@ -186,7 +188,9 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
             {
                 "stage": "pi0_datamodel_selection",
                 "config_name": args.common.config_name,
-                "dataset_len": dataset_len,
+                "selection_unit": "episode",
+                "num_frames": len(selection_dataset),
+                "num_episodes": num_episodes,
                 "num_selected_before": len(selected_indices),
                 "num_candidates": len(scored_indices),
                 "include_index_path": include_index_path,
@@ -234,7 +238,7 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
         seed=config.seed + args.job_id,
     )
     score_dict = score_candidates(model, candidate_loader, reference_grad, device, max_batches=args.candidate_batches)
-    scores = scores_to_array(score_dict, dataset_len)
+    scores = scores_to_array(score_dict, episode_ids)
     selected_after = select_by_percentile(
         scores,
         existing_indices=selected_indices,
@@ -244,7 +248,7 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
     )
     save_outputs(output_dir, scores, selected_after, dataclasses.asdict(config))
     print(f"Saved pi0 datamodel outputs to {output_dir}")
-    print(f"Selected {len(selected_after)} / {dataset_len} source samples")
+    print(f"Selected {len(selected_after)} / {num_episodes} source episodes")
     return output_dir
 
 
@@ -254,6 +258,7 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
 
     from datamil_pi0.data import create_mixed_train_loader
     from datamil_pi0.data import create_raw_lerobot_dataset
+    from datamil_pi0.data import build_episode_index
     from datamil_pi0.data import tree_to_device
     from datamil_pi0.modeling import make_lr_schedule
     from datamil_pi0.modeling import make_pi0_pytorch_model
@@ -270,12 +275,15 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     selection_dataset = create_raw_lerobot_dataset(config, args.common.selection_repo_index)
-    selected_indices = load_include_indices(args.include_index_path, len(selection_dataset))
+    episode_ids = sorted(build_episode_index(selection_dataset))
+    selected_indices = load_include_indices(args.include_index_path, episode_ids)
     with open(output_dir / "selected_training_info.json", "w") as f:
         json.dump(
             {
                 "stage": "selected_pi0_training",
                 "config_name": args.common.config_name,
+                "selection_unit": "episode",
+                "num_source_episodes": len(episode_ids),
                 "include_index_path": str(Path(args.include_index_path).expanduser().resolve()),
                 "num_selected": len(selected_indices),
             },

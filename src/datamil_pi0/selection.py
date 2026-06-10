@@ -13,21 +13,33 @@ from datamil_pi0.modeling import loss_grad_vector
 from datamil_pi0.modeling import per_sample_loss
 
 
-def load_include_indices(path: str | None, dataset_len: int) -> list[int]:
+def _available_indices(available: int | Sequence[int]) -> list[int]:
+    if isinstance(available, int):
+        return list(range(available))
+    return [int(i) for i in available]
+
+
+def load_include_indices(path: str | None, available: int | Sequence[int]) -> list[int]:
+    available_indices = _available_indices(available)
     if path is None:
-        return list(range(dataset_len))
+        return available_indices
     with open(path, "r") as f:
         payload = json.load(f)
-    if "sample_indices" in payload:
-        return [int(i) for i in payload["sample_indices"]]
-    if "indices" in payload:
-        return [int(i) for i in payload["indices"]]
-    return list(range(dataset_len))
+    if "episode_indices" in payload:
+        indices = [int(i) for i in payload["episode_indices"]]
+    elif "sample_indices" in payload:
+        indices = [int(i) for i in payload["sample_indices"]]
+    elif "indices" in payload:
+        indices = [int(i) for i in payload["indices"]]
+    else:
+        return available_indices
+    available_set = set(available_indices)
+    return [index for index in indices if index in available_set]
 
 
 def save_include_indices(path: str | os.PathLike, indices: Sequence[int]) -> None:
     with open(path, "w") as f:
-        json.dump({"version": 1, "sample_indices": [int(i) for i in indices]}, f, indent=2)
+        json.dump({"version": 2, "unit": "episode", "episode_indices": [int(i) for i in indices]}, f, indent=2)
 
 
 def compute_reference_grad(model, val_loader, device, *, val_steps: int) -> torch.Tensor:
@@ -54,14 +66,17 @@ def score_candidates(model, candidate_loader, reference_grad, device, *, max_bat
         actions = actions.to(device=device, dtype=torch.float32)
         indices = indices.cpu().numpy()
         losses = per_sample_loss(model, observation, actions)
-        for row, sample_index in enumerate(indices):
+        for row, episode_index in enumerate(indices):
             grad = loss_grad_vector(model, losses[row], retain_graph=row < len(indices) - 1)
-            scores[int(sample_index)] = float(-torch.dot(reference_grad, grad).detach().cpu())
+            score = float(-torch.dot(reference_grad, grad).detach().cpu())
+            scores[int(episode_index)] = scores.get(int(episode_index), 0.0) + score
     return scores
 
 
-def scores_to_array(scores: dict[int, float], dataset_len: int) -> np.ndarray:
-    out = np.zeros((dataset_len,), dtype=np.float32)
+def scores_to_array(scores: dict[int, float], available: int | Sequence[int]) -> np.ndarray:
+    available_indices = _available_indices(available)
+    size = max(available_indices, default=-1) + 1
+    out = np.zeros((size,), dtype=np.float32)
     for index, score in scores.items():
         out[index] = score
     return out
@@ -100,4 +115,3 @@ def save_outputs(checkpoint_path: str | os.PathLike, scores: np.ndarray, selecte
     save_include_indices(path / "include_index.json", selected_indices)
     with open(path / "hparams_config.json", "w") as f:
         json.dump(config_dict, f, indent=2, default=str)
-

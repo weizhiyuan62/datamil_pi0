@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Iterator, Sequence
 import dataclasses
 from typing import Any
+import warnings
 
 import numpy as np
 import torch
@@ -49,10 +51,18 @@ def collate_fn(items):
 
 
 class TransformedIndexedDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset, transform, indices: Sequence[int] | None = None):
+    def __init__(
+        self,
+        dataset,
+        transform,
+        indices: Sequence[int] | None = None,
+        *,
+        index_labels: dict[int, int] | None = None,
+    ):
         self._dataset = dataset
         self._indices = list(range(len(dataset))) if indices is None else [int(i) for i in indices]
         self._transform = transform
+        self._index_labels = index_labels or {}
 
     def __len__(self) -> int:
         return len(self._indices)
@@ -60,8 +70,57 @@ class TransformedIndexedDataset(torch.utils.data.Dataset):
     def __getitem__(self, index: int) -> dict:
         source_index = self._indices[index]
         item = self._transform(self._dataset[source_index])
-        item["__datamil_index__"] = np.asarray(source_index, dtype=np.int64)
+        item["__datamil_index__"] = np.asarray(self._index_labels.get(source_index, source_index), dtype=np.int64)
         return item
+
+
+def _to_int(value: Any) -> int:
+    if isinstance(value, torch.Tensor):
+        value = value.detach().cpu().numpy()
+    array = np.asarray(value)
+    if array.shape == ():
+        return int(array.item())
+    return int(array.reshape(-1)[0])
+
+
+def sample_episode_index(sample: dict, fallback: int) -> int:
+    for key in ("episode_index", "episode", "episode_id"):
+        if key in sample:
+            return _to_int(sample[key])
+    warnings.warn(
+        "Dataset sample does not contain episode_index; falling back to one frame per episode.",
+        RuntimeWarning,
+        stacklevel=2,
+    )
+    return int(fallback)
+
+
+def build_episode_index(dataset) -> dict[int, list[int]]:
+    episode_to_frames: dict[int, list[int]] = defaultdict(list)
+    for frame_index in range(len(dataset)):
+        episode = sample_episode_index(dataset[frame_index], fallback=frame_index)
+        episode_to_frames[int(episode)].append(int(frame_index))
+    return {episode: frames for episode, frames in sorted(episode_to_frames.items())}
+
+
+def frame_labels_from_episodes(episode_to_frames: dict[int, list[int]]) -> dict[int, int]:
+    return {frame_index: episode for episode, frames in episode_to_frames.items() for frame_index in frames}
+
+
+def frames_for_episodes(episode_to_frames: dict[int, list[int]], episode_indices: Sequence[int] | None) -> list[int] | None:
+    if episode_indices is None:
+        return None
+    frames: list[int] = []
+    missing: list[int] = []
+    for episode in episode_indices:
+        episode = int(episode)
+        if episode not in episode_to_frames:
+            missing.append(episode)
+            continue
+        frames.extend(episode_to_frames[episode])
+    if missing:
+        raise ValueError(f"Unknown episode indices: {missing[:10]}")
+    return frames
 
 
 class MixedDataset(torch.utils.data.Dataset):
@@ -173,7 +232,14 @@ def create_indexed_loader(
     seed: int | None = None,
 ) -> IndexedPi0Loader:
     dataset = create_raw_lerobot_dataset(config, repo_index)
-    dataset = TransformedIndexedDataset(dataset, make_transform(config), indices=indices)
+    episode_to_frames = build_episode_index(dataset)
+    frame_indices = frames_for_episodes(episode_to_frames, indices)
+    dataset = TransformedIndexedDataset(
+        dataset,
+        make_transform(config),
+        indices=frame_indices,
+        index_labels=frame_labels_from_episodes(episode_to_frames),
+    )
     return IndexedPi0Loader(
         dataset,
         batch_size=batch_size,
@@ -196,7 +262,11 @@ def create_mixed_train_loader(
     datasets = []
     for repo_index in range(len(config.data.repo_ids)):
         raw_dataset = create_raw_lerobot_dataset(config, repo_index)
-        indices = selected_indices if repo_index == selection_repo_index else None
+        if repo_index == selection_repo_index and selected_indices is not None:
+            episode_to_frames = build_episode_index(raw_dataset)
+            indices = frames_for_episodes(episode_to_frames, selected_indices)
+        else:
+            indices = None
         dataset = torch.utils.data.Subset(raw_dataset, indices) if indices is not None else raw_dataset
         datasets.append(WrappedDataset(dataset, transform))
 

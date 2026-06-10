@@ -2,6 +2,8 @@
 
 PyTorch pi0 + DataMIL for LIBERO. Use official LIBERO hdf5 demos, then convert them locally to LeRobot format for training.
 
+DataMIL selection is episode-level: pi0 still trains on frame/action chunks, but every chunk from the same LIBERO episode shares one datamodel score and one include/exclude decision.
+
 ## Setup
 
 ```bash
@@ -148,6 +150,8 @@ checkpoints/libero_cotrain_l450_test_50_50/datamil_pi0_libero/datamil/iter_<id>/
   datamodels.npy
   include_index.json
 ```
+
+`include_index.json` stores selected `episode_indices`.
 
 ## Stage 2: Train pi0 On Selected Data
 
