@@ -162,7 +162,7 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
 
     from datamil_pi0.data import create_indexed_loader
     from datamil_pi0.data import create_raw_lerobot_dataset
-    from datamil_pi0.data import create_weighted_mixed_train_loader
+    from datamil_pi0.data import create_weighted_source_train_loader
     from datamil_pi0.data import build_episode_index
     from datamil_pi0.modeling import make_pi0_pytorch_model
     from datamil_pi0.metagradients import strict_datamodel_scores
@@ -222,6 +222,8 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
                 "matches_octo_data_weight_objective": True,
                 "memory_engine": "pytorch_segmented_replay_vjp",
                 "score_definition": "d(target_validation_loss_after_inner_training)/d(candidate_episode_weight)",
+                "inner_train_data": "source_only",
+                "selected_policy_train_data": "selected_source_plus_target_mixed",
                 "config_name": args.common.config_name,
                 "selection_unit": "episode",
                 "num_frames": len(selection_dataset),
@@ -244,12 +246,11 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
     if args.no_inner_train:
         inner_steps = 0
 
-    train_loader = create_weighted_mixed_train_loader(
+    train_loader = create_weighted_source_train_loader(
         config,
-        selection_repo_index=args.common.selection_repo_index,
+        repo_index=args.common.selection_repo_index,
         selected_indices=selected_indices,
         batch_size=config.batch_size,
-        shuffle=True,
         seed=config.seed + args.job_id,
     )
     val_loader = create_indexed_loader(

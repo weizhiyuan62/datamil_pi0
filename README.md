@@ -111,6 +111,8 @@ It samples 30 episodes across all input datasets and writes the `norm_stats.json
 
 pi0 DataMIL uses the same data-weight metagradient objective as the Octo implementation: selected source episodes train with weight 1, candidate source episodes enter the inner trajectory with weight 0, and `datamodels.npy` stores `d(target_validation_loss) / d(candidate_episode_weight)`.
 
+Stage 1 datamodel selection trains only on the source/prior dataset. The target dataset is used for validation gradients only.
+
 Smoke first:
 
 ```bash
@@ -184,6 +186,8 @@ checkpoints/libero_cotrain_l450_test_50_50/datamil_pi0_libero/datamil/iter_<id>/
 `include_index.json` stores selected `episode_indices`.
 
 ## Stage 2: Train pi0 On Selected Data
+
+Stage 2 trains pi0 on the selected source episodes mixed with the target dataset according to `--dataset-weights`.
 
 ```bash
 python scripts/train_pi0_selected_libero.py \

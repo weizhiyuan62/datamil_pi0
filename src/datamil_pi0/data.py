@@ -358,3 +358,38 @@ def create_weighted_mixed_train_loader(
         generator=torch.Generator().manual_seed(seed),
     )
     return WeightedPi0TrainLoader(torch_loader, dataset=mixed, batch_size=batch_size)
+
+
+def create_weighted_source_train_loader(
+    config: TrainConfig,
+    *,
+    repo_index: int,
+    selected_indices: Sequence[int] | None,
+    batch_size: int,
+    seed: int,
+) -> WeightedPi0TrainLoader:
+    raw_dataset = create_raw_lerobot_dataset(config, repo_index)
+    episode_to_frames = build_episode_index(raw_dataset)
+    frame_indices = frames_for_episodes(episode_to_frames, selected_indices)
+    dataset = TransformedIndexedDataset(
+        raw_dataset,
+        make_transform(config),
+        indices=frame_indices,
+        index_labels=frame_labels_from_episodes(episode_to_frames),
+    )
+    mixed = MixedDataset(
+        [dataset],
+        [1.0],
+        length=config.data.mixed_dataset_length,
+        seed=seed,
+    )
+    torch_loader = torch.utils.data.DataLoader(
+        mixed,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=config.num_workers,
+        drop_last=True,
+        collate_fn=collate_fn,
+        generator=torch.Generator().manual_seed(seed),
+    )
+    return WeightedPi0TrainLoader(torch_loader, dataset=mixed, batch_size=batch_size)
