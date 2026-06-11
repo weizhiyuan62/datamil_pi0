@@ -43,6 +43,7 @@ def parse_args() -> argparse.Namespace:
         default="action_projections",
         help="Trainable Pi0 scope for differentiable DataMIL inner updates.",
     )
+    parser.add_argument("--debug-memory", action="store_true", help="Print DataMIL stage/step CUDA memory diagnostics.")
     parser.add_argument("--train-steps", type=int, default=None)
     parser.add_argument("--save-interval", type=int, default=None)
     parser.add_argument("--log-interval", type=int, default=50)
@@ -77,6 +78,7 @@ def main() -> None:
                 high_percentile=args.high_percentile,
                 no_inner_train=args.no_inner_train,
                 trainable_scope=args.datamodel_trainable_scope,
+                debug_memory=args.debug_memory,
             )
         )
 

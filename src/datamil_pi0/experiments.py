@@ -54,6 +54,7 @@ class DatamodelSelectionArgs:
     high_percentile: float = 80.0
     no_inner_train: bool = False
     trainable_scope: str = "action_projections"
+    debug_memory: bool = False
 
 
 @dataclass(frozen=True)
@@ -244,6 +245,7 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
                 "num_candidates": len(scored_indices),
                 "bob_steps": args.bob_steps,
                 "segment_size": args.segment_size,
+                "debug_memory": args.debug_memory,
                 "include_index_path": include_index_path,
                 "episode_subset_path": None if episode_subset_path is None else str(episode_subset_path),
                 "norm_stats_path": norm_stats_path,
@@ -293,6 +295,7 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
         segment_size=args.segment_size,
         val_steps=args.val_steps,
         candidate_batches=args.candidate_batches,
+        debug_memory=args.debug_memory,
     )
     scores = scores_to_array(score_dict, episode_ids)
     selected_after = select_by_percentile(

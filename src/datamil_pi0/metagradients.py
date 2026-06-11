@@ -14,6 +14,25 @@ from datamil_pi0.data import tree_to_device
 from datamil_pi0.modeling import make_lr_schedule
 
 
+def cuda_memory_line(device: torch.device) -> str:
+    if device.type != "cuda" or not torch.cuda.is_available():
+        return "cuda=unavailable"
+    index = torch.cuda.current_device() if device.index is None else device.index
+    allocated = torch.cuda.memory_allocated(index) / 1024**3
+    reserved = torch.cuda.memory_reserved(index) / 1024**3
+    max_allocated = torch.cuda.max_memory_allocated(index) / 1024**3
+    free, total = torch.cuda.mem_get_info(index)
+    return (
+        f"cuda:{index} alloc={allocated:.2f}GiB reserved={reserved:.2f}GiB "
+        f"max_alloc={max_allocated:.2f}GiB free={free / 1024**3:.2f}GiB total={total / 1024**3:.2f}GiB"
+    )
+
+
+def log_memory(label: str, device: torch.device, *, enabled: bool) -> None:
+    if enabled:
+        print(f"[datamodel-memory] {label} | {cuda_memory_line(device)}", flush=True)
+
+
 @dataclass
 class AdamState:
     step: int
@@ -282,6 +301,8 @@ def candidate_train_step(
     lr: float,
     candidate_batches: int | None,
     create_graph: bool,
+    debug_memory: bool = False,
+    debug_label: str = "candidate",
 ) -> FunctionalState:
     batches = []
     total_count = 0
@@ -294,11 +315,13 @@ def candidate_train_step(
         raise ValueError("No candidate batches were produced.")
 
     grad_sums: list[torch.Tensor | None] = [None for _ in state.params]
-    for observation, actions, episode_indices in batches:
+    for microbatch_idx, (observation, actions, episode_indices) in enumerate(batches):
+        log_memory(f"{debug_label} microbatch={microbatch_idx} before_forward", device, enabled=debug_memory)
         observation = tree_to_device(observation, device)
         actions = actions.to(device=device, dtype=torch.float32)
         episode_indices = episode_indices.to(device=device)
         per_sample = functional_per_sample_loss(model, state.params, buffers, observation, actions)
+        log_memory(f"{debug_label} microbatch={microbatch_idx} after_forward", device, enabled=debug_memory)
         batch_loss = episode_weighted_loss(
             per_sample,
             episode_indices,
@@ -310,12 +333,15 @@ def candidate_train_step(
         )
         loss = batch_loss * (float(per_sample.numel()) / float(total_count))
         grads = torch.autograd.grad(loss, tuple(state.params.values()), create_graph=create_graph, allow_unused=True)
+        log_memory(f"{debug_label} microbatch={microbatch_idx} after_grad", device, enabled=debug_memory)
         for idx, grad in enumerate(grads):
             if grad is None:
                 continue
             grad_sums[idx] = grad if grad_sums[idx] is None else grad_sums[idx] + grad
 
+    log_memory(f"{debug_label} before_adamw", device, enabled=debug_memory)
     params, adam = differentiable_adamw_step_from_grads(state.params, state.adam, grad_sums, config, lr)
+    log_memory(f"{debug_label} after_adamw", device, enabled=debug_memory)
     return FunctionalState(params=params, adam=adam)
 
 
@@ -356,10 +382,18 @@ def replay_segment(
     lr_schedule,
     candidate_batches: int | None,
     create_graph: bool,
+    stage_name: str = "replay_segment",
+    debug_memory: bool = False,
 ) -> FunctionalState:
     state = start_state
+    log_memory(
+        f"{stage_name} start start_step={start_step} end_step={end_step} candidate_step={candidate_step} create_graph={create_graph}",
+        device,
+        enabled=debug_memory,
+    )
     for step in range(start_step, end_step):
         if step == candidate_step:
+            log_memory(f"{stage_name} step={step} kind=candidate before", device, enabled=debug_memory)
             state = candidate_train_step(
                 model=model,
                 state=state,
@@ -374,9 +408,19 @@ def replay_segment(
                 lr=lr_schedule(step),
                 candidate_batches=candidate_batches,
                 create_graph=create_graph,
+                debug_memory=debug_memory,
+                debug_label=f"{stage_name} step={step} candidate",
             )
+            log_memory(f"{stage_name} step={step} kind=candidate after", device, enabled=debug_memory)
         else:
-            batch = train_loader.batch_at(regular_batch_index_for_step(step, candidate_step))
+            regular_batch_index = regular_batch_index_for_step(step, candidate_step)
+            log_memory(
+                f"{stage_name} step={step} kind=regular regular_batch={regular_batch_index} before_batch",
+                device,
+                enabled=debug_memory,
+            )
+            batch = train_loader.batch_at(regular_batch_index)
+            log_memory(f"{stage_name} step={step} kind=regular after_batch before_train", device, enabled=debug_memory)
             state = regular_train_step(
                 model=model,
                 state=state,
@@ -389,6 +433,8 @@ def replay_segment(
                 lr=lr_schedule(step),
                 create_graph=create_graph,
             )
+            log_memory(f"{stage_name} step={step} kind=regular after_train", device, enabled=debug_memory)
+    log_memory(f"{stage_name} done", device, enabled=debug_memory)
     return state
 
 
@@ -416,6 +462,7 @@ def strict_datamodel_scores(
     segment_size: int,
     val_steps: int,
     candidate_batches: int | None,
+    debug_memory: bool = False,
 ) -> dict[int, float]:
     selected_episode_indices = [int(i) for i in selected_episode_indices]
     candidate_episode_indices = [int(i) for i in candidate_episode_indices]
@@ -436,8 +483,17 @@ def strict_datamodel_scores(
     lr_schedule = make_lr_schedule(config)
 
     total_steps, candidate_step, _ = trajectory_layout(inner_train_steps, bob_steps)
+    print(
+        "[datamodel] layout "
+        f"total_steps={total_steps} candidate_step={candidate_step} "
+        f"bob_steps={bob_steps} segment_size={segment_size} "
+        f"val_steps={val_steps} candidate_batches={candidate_batches}",
+        flush=True,
+    )
+    log_memory("initial_state_ready", device, enabled=debug_memory)
 
     if candidate_step > 0:
+        print(f"[datamodel] pre_candidate_forward_only start 0->{candidate_step}", flush=True)
         pre_candidate_state = replay_segment(
             model=model,
             start_state=state,
@@ -456,17 +512,23 @@ def strict_datamodel_scores(
             lr_schedule=lr_schedule,
             candidate_batches=candidate_batches,
             create_graph=False,
+            stage_name="pre_candidate_forward_only",
+            debug_memory=debug_memory,
         )
+        print(f"[datamodel] pre_candidate_forward_only done 0->{candidate_step}", flush=True)
     else:
         pre_candidate_state = state
 
     tail_save_points = [candidate_step + point for point in make_save_points(total_steps - candidate_step, segment_size)]
+    print(f"[datamodel] tail_save_points={tail_save_points}", flush=True)
     saved_states: dict[int, FunctionalState] = {
         candidate_step: detach_functional_state(pre_candidate_state, device=torch.device("cpu"))
     }
     current_state = pre_candidate_state
     for start, end in zip(tail_save_points[:-1], tail_save_points[1:], strict=True):
+        print(f"[datamodel] tail_forward_save segment {start}->{end}", flush=True)
         current_state = clone_functional_state(saved_states[start], device=device, requires_grad=True)
+        log_memory(f"tail_forward_save segment {start}->{end} after_state_clone", device, enabled=debug_memory)
         current_state = replay_segment(
             model=model,
             start_state=current_state,
@@ -485,18 +547,28 @@ def strict_datamodel_scores(
             lr_schedule=lr_schedule,
             candidate_batches=candidate_batches,
             create_graph=False,
+            stage_name=f"tail_forward_save {start}->{end}",
+            debug_memory=debug_memory,
         )
         saved_states[end] = detach_functional_state(current_state, device=torch.device("cpu"))
+        log_memory(f"tail_forward_save segment {start}->{end} after_state_save_cpu", device, enabled=debug_memory)
 
+    print("[datamodel] validation_head start", flush=True)
     final_state = clone_functional_state(saved_states[total_steps], device=device, requires_grad=True)
+    log_memory("validation_head after_final_state_clone", device, enabled=debug_memory)
     val_loss = validation_loss(model, final_state.params, buffers, val_loader, device, val_steps=val_steps)
+    log_memory("validation_head after_val_loss", device, enabled=debug_memory)
     final_tensors = state_tensors(final_state)
     final_grads = torch.autograd.grad(val_loss, final_tensors, allow_unused=True)
+    log_memory("validation_head after_final_grads", device, enabled=debug_memory)
     cotangents = tuple(torch.zeros_like(tensor) if grad is None else grad for tensor, grad in zip(final_tensors, final_grads, strict=True))
+    print("[datamodel] validation_head done", flush=True)
 
     candidate_cotangent = torch.zeros_like(candidate_weights)
     for start, end in reversed(list(zip(tail_save_points[:-1], tail_save_points[1:], strict=True))):
+        print(f"[datamodel] tail_backward_replay segment {start}->{end}", flush=True)
         start_state = clone_functional_state(saved_states[start], device=device, requires_grad=True)
+        log_memory(f"tail_backward_replay segment {start}->{end} after_start_state_clone", device, enabled=debug_memory)
         end_state = replay_segment(
             model=model,
             start_state=start_state,
@@ -515,15 +587,20 @@ def strict_datamodel_scores(
             lr_schedule=lr_schedule,
             candidate_batches=candidate_batches,
             create_graph=True,
+            stage_name=f"tail_backward_replay {start}->{end}",
+            debug_memory=debug_memory,
         )
+        log_memory(f"tail_backward_replay segment {start}->{end} after_replay_segment", device, enabled=debug_memory)
         end_tensors = state_tensors(end_state)
         start_tensors = state_tensors(start_state)
+        log_memory(f"tail_backward_replay segment {start}->{end} before_vjp_grad", device, enabled=debug_memory)
         grads = torch.autograd.grad(
             end_tensors,
             start_tensors + (candidate_weights,),
             grad_outputs=cotangents,
             allow_unused=True,
         )
+        log_memory(f"tail_backward_replay segment {start}->{end} after_vjp_grad", device, enabled=debug_memory)
         start_grads = grads[:-1]
         candidate_grad = grads[-1]
         if candidate_grad is not None:

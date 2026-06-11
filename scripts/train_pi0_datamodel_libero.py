@@ -44,6 +44,7 @@ def parse_args() -> argparse.Namespace:
         default="action_projections",
         help="Trainable Pi0 scope for differentiable DataMIL inner updates.",
     )
+    parser.add_argument("--debug-memory", action="store_true", help="Print DataMIL stage/step CUDA memory diagnostics.")
     return parser.parse_args()
 
 
@@ -70,6 +71,7 @@ def main() -> None:
             high_percentile=args.high_percentile,
             no_inner_train=args.no_inner_train,
             trainable_scope=args.datamodel_trainable_scope,
+            debug_memory=args.debug_memory,
         )
         print(f"Running pi0 datamodel iteration {job_id}")
         last_output = run_datamodel_selection(run_args)
