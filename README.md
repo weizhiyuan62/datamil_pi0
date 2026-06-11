@@ -67,19 +67,6 @@ python scripts/convert_official_libero_to_lerobot.py \
   --overwrite
 ```
 
-For a quick converter smoke test:
-
-```bash
-python scripts/convert_official_libero_to_lerobot.py \
-  --libero-raw-root $RAW_LIBERO_ROOT \
-  --output-root $LEROBOT_ROOT/smoke \
-  --source-repo-id libero90_smoke \
-  --target-repo-id libero10_smoke \
-  --max-source-episodes 2 \
-  --max-target-episodes 2 \
-  --overwrite
-```
-
 ## Check Data
 
 Training and checking read the converted LeRobot parquet files directly with `datamil_pi0.dataset.LeRobotParquetDataset`; they do not use LeRobot's runtime dataset loader.
