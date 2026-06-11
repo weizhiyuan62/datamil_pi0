@@ -57,7 +57,7 @@ def main() -> None:
     for repo_id, root in tqdm.tqdm(zip(args.repo_ids, args.roots, strict=True)):
         try:
             meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id, root=root)
-            delta_timestamps = {args.action_key: [t / meta.fps for t in range(50)]}
+            delta_timestamps = {args.action_key: [t / meta.fps for t in range(15)]}                         # action_horizon = 15 according to the DataMIL paper
             dataset = lerobot_dataset.LeRobotDataset(repo_id, root=root, delta_timestamps=delta_timestamps)
         except Exception as exc:
             raise LocalLeRobotDatasetError(local_lerobot_error_message(repo_id, root, exc)) from exc

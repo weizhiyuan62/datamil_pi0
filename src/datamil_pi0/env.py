@@ -10,7 +10,7 @@ def configure_hf_datasets_cache(cache_dir: str | Path | None = None) -> Path:
         cache_dir = os.environ.get("DATAMIL_PI0_CACHE_DIR")
     if cache_dir is None:
         user = os.environ.get("USER") or os.environ.get("USERNAME") or "user"
-        cache_dir = Path("/tmp") / f"datamil_pi0_hf_cache_{user}"
+        cache_dir = Path(f"/tmp/{user}") / f"datamil_pi0_hf_cache_{user}"      # instead of /tmp to avoid potential issues with /tmp being a tmpfs with limited space
 
     cache_path = Path(cache_dir).expanduser().resolve()
     datasets_cache = cache_path / "datasets"
