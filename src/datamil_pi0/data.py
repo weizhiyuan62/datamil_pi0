@@ -10,9 +10,7 @@ import numpy as np
 import torch
 
 from datamil_pi0.configs import TrainConfig
-from datamil_pi0.env import LocalLeRobotDatasetError
-from datamil_pi0.env import configure_hf_datasets_cache
-from datamil_pi0.env import local_lerobot_error_message
+from datamil_pi0.dataset import LeRobotParquetDataset
 from datamil_pi0.model.observation import Observation
 from datamil_pi0.transforms import load_norm_stats
 from datamil_pi0.transforms import make_libero_transforms
@@ -99,6 +97,18 @@ def sample_episode_index(sample: dict, fallback: int) -> int:
 
 
 def build_episode_index(dataset) -> dict[int, list[int]]:
+    episode_data_index = getattr(dataset, "episode_data_index", None)
+    episode_indices = getattr(dataset, "episode_indices", None)
+    if isinstance(episode_data_index, dict) and "from" in episode_data_index and "to" in episode_data_index:
+        starts = np.asarray(episode_data_index["from"]).reshape(-1)
+        ends = np.asarray(episode_data_index["to"]).reshape(-1)
+        if episode_indices is None:
+            episode_indices = list(range(len(starts)))
+        return {
+            int(episode): list(range(int(start), int(end)))
+            for episode, start, end in zip(episode_indices, starts, ends, strict=True)
+        }
+
     episode_to_frames: dict[int, list[int]] = defaultdict(list)
     for frame_index in range(len(dataset)):
         episode = sample_episode_index(dataset[frame_index], fallback=frame_index)
@@ -208,41 +218,19 @@ class Pi0TrainLoader:
 
 
 def create_raw_lerobot_dataset(config: TrainConfig, repo_index: int):
-    configure_hf_datasets_cache()
-    import lerobot.common.datasets.lerobot_dataset as lerobot_dataset
-
     repo_id = config.data.repo_ids[repo_index]
     root = config.data.roots[repo_index]
-    try:
-        if root is None:
-            meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id)
-            dataset = lerobot_dataset.LeRobotDataset(
-                repo_id,
-                delta_timestamps={
-                    key: [t / meta.fps for t in range(config.model.action_horizon)]
-                    for key in config.data.action_sequence_keys
-                },
-            )
-        else:
-            meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id, root=root)
-            dataset = lerobot_dataset.LeRobotDataset(
-                repo_id,
-                root=root,
-                delta_timestamps={
-                    key: [t / meta.fps for t in range(config.model.action_horizon)]
-                    for key in config.data.action_sequence_keys
-                },
-            )
-    except Exception as exc:
-        if root is not None:
-            raise LocalLeRobotDatasetError(local_lerobot_error_message(repo_id, root, exc)) from exc
-        raise
-    if config.data.prompt_from_task:
-        from datamil_pi0.transforms import PromptFromLeRobotTask
-        from datamil_pi0.transforms import Compose
-
-        dataset = WrappedDataset(dataset, Compose([PromptFromLeRobotTask(meta.tasks)]))
-    return dataset
+    if root is None:
+        raise ValueError(
+            f"Local root is required for repo_id={repo_id!r}. This project now reads converted LeRobot parquet files directly."
+        )
+    action_key = config.data.action_sequence_keys[0]
+    return LeRobotParquetDataset(
+        repo_id,
+        root,
+        action_key=action_key,
+        action_horizon=config.model.action_horizon,
+    )
 
 
 class WrappedDataset(torch.utils.data.Dataset):

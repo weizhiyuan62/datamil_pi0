@@ -11,8 +11,6 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from datamil_pi0.experiments import CommonOverrides  # noqa: E402
-from datamil_pi0.env import configure_hf_datasets_cache  # noqa: E402
-
 
 def add_common_args(parser: argparse.ArgumentParser, *, default_exp_name: str) -> None:
     parser.add_argument("--config-name", default="libero_cotrain_l450_test_50_50")
@@ -31,11 +29,9 @@ def add_common_args(parser: argparse.ArgumentParser, *, default_exp_name: str) -
     parser.add_argument("--pytorch-training-precision", choices=["bfloat16", "float32"], default=None)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--device", default="cuda")
-    parser.add_argument("--hf-cache-dir", default=None, help="Optional Hugging Face datasets cache dir.")
 
 
 def common_overrides(args: argparse.Namespace) -> CommonOverrides:
-    configure_hf_datasets_cache(args.hf_cache_dir)
     return CommonOverrides(
         config_name=args.config_name,
         exp_name=args.exp_name,

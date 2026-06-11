@@ -13,13 +13,6 @@ source .venv/bin/activate
 python scripts/patch_transformers.py
 ```
 
-This project pins `datasets<3` for LeRobot 0.1.0 compatibility. If reusing an existing environment, make sure it is not using `datasets` 5.x:
-
-```bash
-python -c 'import datasets; print(datasets.__version__)'
-uv pip install 'datasets>=2.19.0,<3.0.0'
-```
-
 Put the tokenizer at:
 
 ```text
@@ -35,7 +28,6 @@ export LEROBOT_ROOT=$STORAGE_ROOT/libero/official_lerobot
 export SOURCE_ROOT=$LEROBOT_ROOT/libero90_lerobot
 export TARGET_ROOT=$LEROBOT_ROOT/libero10_lerobot
 export PI0_WEIGHT_PATH=/mnt/home/weizhiyuan/data/research_wzy/datamil_pi0/assets/pi0_droid_pytorch
-export DATAMIL_PI0_CACHE_DIR=/tmp/$USER/datamil_pi0_hf_cache_$USER
 ```
 
 `PI0_WEIGHT_PATH` must contain `model.safetensors`.
@@ -83,6 +75,8 @@ python scripts/convert_official_libero_to_lerobot.py \
 
 ## Check Data
 
+Training and checking read the converted LeRobot parquet files directly with `datamil_pi0.dataset.LeRobotParquetDataset`; they do not use LeRobot's runtime dataset loader.
+
 ```bash
 python scripts/check_libero_lerobot.py \
   --repo-ids libero90_lerobot libero10_lerobot \
@@ -95,12 +89,6 @@ Expected official scale is roughly:
 ```text
 libero_90: 4500 episodes
 libero_10: 500 episodes
-```
-
-If this step fails with a `filelock` or `huggingface.co/api/datasets/<repo_id>/refs` error, clear the local datasets cache and rerun:
-
-```bash
-rm -rf $DATAMIL_PI0_CACHE_DIR/datasets
 ```
 
 ## Compute Norm Stats

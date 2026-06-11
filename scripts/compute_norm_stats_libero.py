@@ -171,10 +171,16 @@ def scalar_int(value) -> int:
 
 def episode_to_frame_indices(dataset) -> dict[int, list[int]]:
     episode_data_index = getattr(dataset, "episode_data_index", None)
+    episode_indices = getattr(dataset, "episode_indices", None)
     if isinstance(episode_data_index, dict) and "from" in episode_data_index and "to" in episode_data_index:
         starts = to_numpy(episode_data_index["from"]).reshape(-1)
         ends = to_numpy(episode_data_index["to"]).reshape(-1)
-        return {episode: list(range(int(start), int(end))) for episode, (start, end) in enumerate(zip(starts, ends, strict=True))}
+        if episode_indices is None:
+            episode_indices = list(range(len(starts)))
+        return {
+            int(episode): list(range(int(start), int(end)))
+            for episode, start, end in zip(episode_indices, starts, ends, strict=True)
+        }
 
     episodes: dict[int, list[int]] = {}
     for frame_index in range(len(dataset)):
@@ -206,7 +212,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-frames", type=int, default=None)
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--extra-delta-transform", action="store_true", help="Compute action stats after LIBERO delta-action conversion.")
-    parser.add_argument("--hf-cache-dir", default=None, help="Optional Hugging Face datasets cache dir.")
     return parser.parse_args()
 
 
@@ -223,17 +228,14 @@ def make_config(args):
 
 
 def create_dataset(repo_id: str, root: str, *, action_key: str, action_horizon: int, extra_delta_transform: bool):
-    from datamil_pi0.env import LocalLeRobotDatasetError
-    from datamil_pi0.env import local_lerobot_error_message
+    from datamil_pi0.dataset import LeRobotParquetDataset
 
-    import lerobot.common.datasets.lerobot_dataset as lerobot_dataset
-
-    try:
-        meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id, root=root)
-        delta_timestamps = {action_key: [t / meta.fps for t in range(action_horizon)]}
-        dataset = lerobot_dataset.LeRobotDataset(repo_id, root=root, delta_timestamps=delta_timestamps)
-    except Exception as exc:
-        raise LocalLeRobotDatasetError(local_lerobot_error_message(repo_id, root, exc)) from exc
+    dataset = LeRobotParquetDataset(
+        repo_id,
+        root,
+        action_key=action_key,
+        action_horizon=action_horizon,
+    )
     return StatsDataset(dataset, action_key=action_key, extra_delta_transform=extra_delta_transform)
 
 
@@ -248,11 +250,6 @@ def main() -> None:
     args = parse_args()
     if len(args.repo_ids) != len(args.roots):
         raise ValueError("--repo-ids and --roots must have the same length")
-
-    from datamil_pi0.env import configure_hf_datasets_cache
-
-    datasets_cache = configure_hf_datasets_cache(args.hf_cache_dir)
-    print(f"HF_DATASETS_CACHE={datasets_cache}")
 
     import torch
     import tqdm

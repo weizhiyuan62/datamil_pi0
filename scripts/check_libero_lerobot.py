@@ -36,7 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repo-ids", nargs="+", required=True)
     parser.add_argument("--roots", nargs="+", required=True)
     parser.add_argument("--action-key", default="action")
-    parser.add_argument("--hf-cache-dir", default=None, help="Optional Hugging Face datasets cache dir.")
+    parser.add_argument("--action-horizon", type=int, default=50)
     return parser.parse_args()
 
 
@@ -45,29 +45,24 @@ def main() -> None:
     if len(args.repo_ids) != len(args.roots):
         raise ValueError("--repo-ids and --roots must have the same length")
 
-    from datamil_pi0.env import LocalLeRobotDatasetError
-    from datamil_pi0.env import configure_hf_datasets_cache
-    from datamil_pi0.env import local_lerobot_error_message
-
-    datasets_cache = configure_hf_datasets_cache(args.hf_cache_dir)
-    print(f"HF_DATASETS_CACHE={datasets_cache}")
-
-    import lerobot.common.datasets.lerobot_dataset as lerobot_dataset
+    from datamil_pi0.dataset import LeRobotParquetDataset
 
     for repo_id, root in tqdm.tqdm(zip(args.repo_ids, args.roots, strict=True)):
-        try:
-            meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id, root=root)
-            delta_timestamps = {args.action_key: [t / meta.fps for t in range(15)]}                         # action_horizon = 15 according to the DataMIL paper
-            dataset = lerobot_dataset.LeRobotDataset(repo_id, root=root, delta_timestamps=delta_timestamps)
-        except Exception as exc:
-            raise LocalLeRobotDatasetError(local_lerobot_error_message(repo_id, root, exc)) from exc
+        dataset = LeRobotParquetDataset(
+            repo_id,
+            root,
+            action_key=args.action_key,
+            action_horizon=args.action_horizon,
+        )
+        meta = dataset.meta
         sample = dataset[0]
         flat = flatten_dict(sample)
         print(f"\nrepo_id: {repo_id}")
         print(f"root: {root}")
         print(f"num_frames: {len(dataset)}")
+        print(f"num_episodes: {meta.num_episodes}")
         print(f"fps: {meta.fps}")
-        print(f"num_tasks: {len(getattr(meta, 'tasks', {}))}")
+        print(f"num_tasks: {len(meta.tasks)}")
         for label, keys in [
             ("image", ("image", "observation.images.image", "observation/image", "observation.images.image")),
             ("wrist_image", ("wrist_image", "observation.images.wrist_image", "observation/wrist_image")),
