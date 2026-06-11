@@ -297,6 +297,32 @@ def create_indexed_loader(
     )
 
 
+def create_indexed_frame_loader(
+    config: TrainConfig,
+    *,
+    repo_index: int,
+    frame_indices: Sequence[int],
+    batch_size: int,
+    shuffle: bool,
+    seed: int | None = None,
+) -> IndexedPi0Loader:
+    dataset = create_raw_lerobot_dataset(config, repo_index)
+    episode_to_frames = build_episode_index(dataset)
+    dataset = TransformedIndexedDataset(
+        dataset,
+        make_transform(config),
+        indices=frame_indices,
+        index_labels=frame_labels_from_episodes(episode_to_frames),
+    )
+    return IndexedPi0Loader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=config.num_workers,
+        seed=config.seed if seed is None else seed,
+    )
+
+
 def create_mixed_train_loader(
     config: TrainConfig,
     *,

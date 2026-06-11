@@ -35,6 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-steps", type=int, default=32)
     parser.add_argument("--candidate-batches", type=int, default=None)
     parser.add_argument("--candidate-size", type=float, default=1.0)
+    parser.add_argument("--candidate-num", type=int, default=100_000, help="Number of candidate action chunks sampled from candidate episodes.")
     parser.add_argument("--low-percentile", type=float, default=20.0)
     parser.add_argument("--high-percentile", type=float, default=80.0)
     parser.add_argument("--topk", type=float, default=0.1, help="Final top-k episode fraction after averaging all datamodel iterations.")
@@ -76,6 +77,7 @@ def main() -> None:
                 val_steps=args.val_steps,
                 candidate_batches=args.candidate_batches,
                 candidate_size=args.candidate_size,
+                candidate_num=args.candidate_num,
                 low_percentile=args.low_percentile,
                 high_percentile=args.high_percentile,
                 no_inner_train=args.no_inner_train,

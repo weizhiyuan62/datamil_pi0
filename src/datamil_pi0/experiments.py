@@ -50,6 +50,7 @@ class DatamodelSelectionArgs:
     val_steps: int = 32
     candidate_batches: int | None = None
     candidate_size: float = 1.0
+    candidate_num: int | None = 100_000
     low_percentile: float = 20.0
     high_percentile: float = 80.0
     no_inner_train: bool = False
@@ -143,6 +144,41 @@ def candidate_indices(available_indices: Sequence[int], *, candidate_size: float
     return rng.choice(all_indices, size=num, replace=False).astype(int).tolist()
 
 
+def sample_candidate_frame_indices(
+    episode_to_frames: dict[int, list[int]],
+    candidate_episode_indices: Sequence[int],
+    *,
+    candidate_num: int | None,
+    action_horizon: int,
+    seed: int,
+    job_id: int,
+) -> list[int]:
+    valid_episode_frames: dict[int, list[int]] = {}
+    horizon = max(1, int(action_horizon))
+    for episode in candidate_episode_indices:
+        frames = episode_to_frames[int(episode)]
+        num_valid_starts = len(frames) - horizon + 1
+        if num_valid_starts <= 0:
+            continue
+        valid_episode_frames[int(episode)] = frames[:num_valid_starts]
+    if not valid_episode_frames:
+        raise ValueError("No candidate episodes have enough frames for the configured action horizon.")
+
+    if candidate_num is None:
+        return [frame for episode in candidate_episode_indices for frame in valid_episode_frames.get(int(episode), [])]
+    if candidate_num <= 0:
+        raise ValueError("--candidate-num must be positive, or None when called programmatically.")
+
+    rng = np.random.default_rng(seed + job_id)
+    valid_episodes = np.asarray(list(valid_episode_frames), dtype=np.int64)
+    sampled_episodes = rng.choice(valid_episodes, size=int(candidate_num), replace=True)
+    frame_indices: list[int] = []
+    for episode in sampled_episodes:
+        frames = valid_episode_frames[int(episode)]
+        frame_indices.append(int(frames[int(rng.integers(0, len(frames)))]))
+    return frame_indices
+
+
 def torch_device(requested: str):
     import torch
 
@@ -163,6 +199,7 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
     import torch
 
     from datamil_pi0.data import create_indexed_loader
+    from datamil_pi0.data import create_indexed_frame_loader
     from datamil_pi0.data import create_raw_lerobot_dataset
     from datamil_pi0.data import create_weighted_source_train_loader
     from datamil_pi0.data import build_episode_index
@@ -179,7 +216,8 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
     device = torch_device(args.common.device)
 
     selection_dataset = create_raw_lerobot_dataset(config, args.common.selection_repo_index)
-    all_episode_ids = sorted(build_episode_index(selection_dataset))
+    episode_to_frames = build_episode_index(selection_dataset)
+    all_episode_ids = sorted(episode_to_frames)
     episode_ids = [int(i) for i in args.episode_indices] if args.episode_indices is not None else all_episode_ids
     valid_episode_ids = set(all_episode_ids)
     unknown_episode_ids = [i for i in episode_ids if i not in valid_episode_ids]
@@ -199,6 +237,27 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
         candidate_size=args.candidate_size,
         seed=config.seed,
         job_id=args.job_id,
+    )
+    candidate_frame_indices = sample_candidate_frame_indices(
+        episode_to_frames,
+        scored_indices,
+        candidate_num=args.candidate_num,
+        action_horizon=config.model.action_horizon,
+        seed=config.seed,
+        job_id=args.job_id,
+    )
+    candidate_frame_count = len(candidate_frame_indices)
+    candidate_batch_count = (candidate_frame_count + config.batch_size - 1) // config.batch_size
+    print(
+        "[datamodel] candidate set "
+        f"episodes={len(scored_indices)}/{num_episodes} "
+        f"sampled_action_chunks={candidate_frame_count} "
+        f"batch_size={config.batch_size} "
+        f"batches={candidate_batch_count} "
+        f"candidate_size={args.candidate_size} "
+        f"candidate_num={args.candidate_num} "
+        f"candidate_batches={args.candidate_batches}",
+        flush=True,
     )
     output_dir = datamodel_iter_dir(config, job_id=args.job_id, output_dir=args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -244,6 +303,12 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
                 "num_episode_universe": num_episodes,
                 "num_selected_before": len(selected_indices),
                 "num_candidates": len(scored_indices),
+                "num_candidate_action_chunks": len(candidate_frame_indices),
+                "candidate_num": args.candidate_num,
+                "candidate_sampling": (
+                    "sample episodes first, then sample valid frame/action_chunk starts within episode; "
+                    "sampled chunks share episode weights"
+                ),
                 "bob_steps": args.bob_steps,
                 "segment_size": args.segment_size,
                 "debug_memory": args.debug_memory,
@@ -274,10 +339,10 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
         shuffle=False,
         seed=config.seed,
     )
-    candidate_loader = create_indexed_loader(
+    candidate_loader = create_indexed_frame_loader(
         config,
         repo_index=args.common.selection_repo_index,
-        indices=scored_indices,
+        frame_indices=candidate_frame_indices,
         batch_size=config.batch_size,
         shuffle=False,
         seed=config.seed + args.job_id,
