@@ -53,6 +53,7 @@ class DatamodelSelectionArgs:
     low_percentile: float = 20.0
     high_percentile: float = 80.0
     no_inner_train: bool = False
+    trainable_scope: str = "action_projections"
 
 
 @dataclass(frozen=True)
@@ -216,7 +217,7 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
                 indent=2,
             )
     model = make_pi0_pytorch_model(config, device)
-    datamodel_trainable_info = freeze_vlm_for_datamodel_selection(model)
+    datamodel_trainable_info = freeze_vlm_for_datamodel_selection(model, scope=args.trainable_scope)
     print(
         "Datamodel trainable scope: "
         f"{datamodel_trainable_info['scope']} "

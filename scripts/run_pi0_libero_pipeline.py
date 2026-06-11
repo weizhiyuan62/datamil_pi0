@@ -37,6 +37,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--low-percentile", type=float, default=20.0)
     parser.add_argument("--high-percentile", type=float, default=80.0)
     parser.add_argument("--no-inner-train", action="store_true")
+    parser.add_argument(
+        "--datamodel-trainable-scope",
+        choices=["action_projections", "action_expert"],
+        default="action_projections",
+        help="Trainable Pi0 scope for differentiable DataMIL inner updates.",
+    )
     parser.add_argument("--train-steps", type=int, default=None)
     parser.add_argument("--save-interval", type=int, default=None)
     parser.add_argument("--log-interval", type=int, default=50)
@@ -70,6 +76,7 @@ def main() -> None:
                 low_percentile=args.low_percentile,
                 high_percentile=args.high_percentile,
                 no_inner_train=args.no_inner_train,
+                trainable_scope=args.datamodel_trainable_scope,
             )
         )
 

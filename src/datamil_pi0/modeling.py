@@ -40,14 +40,36 @@ DATAMODEL_ACTION_EXPERT_PREFIXES = (
     "time_mlp_out.",
 )
 
+DATAMODEL_ACTION_PROJECTION_PREFIXES = (
+    "action_in_proj.",
+    "action_out_proj.",
+    "state_proj.",
+    "action_time_mlp_in.",
+    "action_time_mlp_out.",
+    "time_mlp_in.",
+    "time_mlp_out.",
+)
 
-def freeze_vlm_for_datamodel_selection(model: torch.nn.Module) -> dict[str, int | list[str]]:
+
+def freeze_vlm_for_datamodel_selection(
+    model: torch.nn.Module,
+    *,
+    scope: str = "action_projections",
+) -> dict[str, int | list[str]]:
+    scopes = {
+        "action_expert": DATAMODEL_ACTION_EXPERT_PREFIXES,
+        "action_projections": DATAMODEL_ACTION_PROJECTION_PREFIXES,
+    }
+    if scope not in scopes:
+        raise ValueError(f"Unknown datamodel trainable scope {scope!r}; expected one of {sorted(scopes)}")
+    trainable_prefixes = scopes[scope]
+
     trainable_names: list[str] = []
     frozen_names: list[str] = []
     trainable_param_count = 0
     frozen_param_count = 0
     for name, param in model.named_parameters():
-        trainable = name.startswith(DATAMODEL_ACTION_EXPERT_PREFIXES)
+        trainable = name.startswith(trainable_prefixes)
         param.requires_grad_(trainable)
         if trainable:
             trainable_names.append(name)
@@ -57,11 +79,11 @@ def freeze_vlm_for_datamodel_selection(model: torch.nn.Module) -> dict[str, int 
             frozen_param_count += param.numel()
 
     if not trainable_names:
-        raise ValueError("No datamodel trainable parameters matched action expert prefixes.")
+        raise ValueError(f"No datamodel trainable parameters matched prefixes for scope {scope!r}.")
 
     return {
-        "scope": "action_expert_plus_action_projections",
-        "trainable_prefixes": list(DATAMODEL_ACTION_EXPERT_PREFIXES),
+        "scope": scope,
+        "trainable_prefixes": list(trainable_prefixes),
         "num_trainable_tensors": len(trainable_names),
         "num_frozen_tensors": len(frozen_names),
         "num_trainable_params": trainable_param_count,
