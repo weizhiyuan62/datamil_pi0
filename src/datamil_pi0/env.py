@@ -1,11 +1,37 @@
 from __future__ import annotations
 
 import os
+from importlib import metadata
 from pathlib import Path
+
+
+def ensure_compatible_datasets_version() -> None:
+    try:
+        version = metadata.version("datasets")
+    except metadata.PackageNotFoundError:
+        return
+
+    try:
+        from packaging.version import Version
+    except ImportError:
+        return
+
+    if Version(version) >= Version("3.0.0"):
+        raise RuntimeError(
+            "Installed datasets package is too new for the pinned LeRobot 0.1.0 checkout used here: "
+            f"datasets=={version}. This can produce LeRobot errors like "
+            "`TypeError: stack(): argument 'tensors' must be tuple of Tensors, not Column`.\n"
+            "Fix the environment with one of:\n"
+            "  uv sync --upgrade-package datasets\n"
+            "  uv pip install 'datasets>=2.19.0,<3.0.0'\n"
+            "Then verify with:\n"
+            "  python -c 'import datasets; print(datasets.__version__)'"
+        )
 
 
 def configure_hf_datasets_cache(cache_dir: str | Path | None = None) -> Path:
     """Configure a stable local Hugging Face datasets cache before importing LeRobot."""
+    ensure_compatible_datasets_version()
     if cache_dir is None:
         cache_dir = os.environ.get("DATAMIL_PI0_CACHE_DIR")
     if cache_dir is None:

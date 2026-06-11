@@ -13,6 +13,13 @@ source .venv/bin/activate
 python scripts/patch_transformers.py
 ```
 
+This project pins `datasets<3` for LeRobot 0.1.0 compatibility. If reusing an existing environment, make sure it is not using `datasets` 5.x:
+
+```bash
+python -c 'import datasets; print(datasets.__version__)'
+uv pip install 'datasets>=2.19.0,<3.0.0'
+```
+
 Put the tokenizer at:
 
 ```text
