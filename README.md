@@ -28,6 +28,7 @@ export LEROBOT_ROOT=$STORAGE_ROOT/libero/official_lerobot
 export SOURCE_ROOT=$LEROBOT_ROOT/libero90_lerobot
 export TARGET_ROOT=$LEROBOT_ROOT/libero10_lerobot
 export PI0_WEIGHT_PATH=/mnt/home/weizhiyuan/data/research_wzy/datamil_pi0/assets/pi0_droid_pytorch
+export DATAMIL_PI0_CACHE_DIR=/tmp/datamil_pi0_hf_cache_$USER
 ```
 
 `PI0_WEIGHT_PATH` must contain `model.safetensors`.
@@ -87,6 +88,12 @@ Expected official scale is roughly:
 ```text
 libero_90: 4500 episodes
 libero_10: 500 episodes
+```
+
+If this step fails with a `filelock` or `huggingface.co/api/datasets/<repo_id>/refs` error, clear the local datasets cache and rerun:
+
+```bash
+rm -rf $DATAMIL_PI0_CACHE_DIR/datasets
 ```
 
 ## Compute Norm Stats

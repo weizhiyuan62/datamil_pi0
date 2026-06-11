@@ -20,3 +20,4 @@ exp/
 datamil_old
 storage/
 assets/
+**.vscode**/

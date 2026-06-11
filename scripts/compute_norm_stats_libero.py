@@ -202,6 +202,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-frames", type=int, default=None)
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--extra-delta-transform", action="store_true", help="Compute action stats after LIBERO delta-action conversion.")
+    parser.add_argument("--hf-cache-dir", default=None, help="Optional Hugging Face datasets cache dir.")
     return parser.parse_args()
 
 
@@ -218,11 +219,17 @@ def make_config(args):
 
 
 def create_dataset(repo_id: str, root: str, *, action_key: str, action_horizon: int, extra_delta_transform: bool):
+    from datamil_pi0.env import LocalLeRobotDatasetError
+    from datamil_pi0.env import local_lerobot_error_message
+
     import lerobot.common.datasets.lerobot_dataset as lerobot_dataset
 
-    meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id, root=root)
-    delta_timestamps = {action_key: [t / meta.fps for t in range(action_horizon)]}
-    dataset = lerobot_dataset.LeRobotDataset(repo_id, root=root, delta_timestamps=delta_timestamps)
+    try:
+        meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id, root=root)
+        delta_timestamps = {action_key: [t / meta.fps for t in range(action_horizon)]}
+        dataset = lerobot_dataset.LeRobotDataset(repo_id, root=root, delta_timestamps=delta_timestamps)
+    except Exception as exc:
+        raise LocalLeRobotDatasetError(local_lerobot_error_message(repo_id, root, exc)) from exc
     return StatsDataset(dataset, action_key=action_key, extra_delta_transform=extra_delta_transform)
 
 
@@ -237,6 +244,11 @@ def main() -> None:
     args = parse_args()
     if len(args.repo_ids) != len(args.roots):
         raise ValueError("--repo-ids and --roots must have the same length")
+
+    from datamil_pi0.env import configure_hf_datasets_cache
+
+    datasets_cache = configure_hf_datasets_cache(args.hf_cache_dir)
+    print(f"HF_DATASETS_CACHE={datasets_cache}")
 
     import torch
     import tqdm

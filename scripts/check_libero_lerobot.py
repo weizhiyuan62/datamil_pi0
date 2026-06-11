@@ -36,6 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repo-ids", nargs="+", required=True)
     parser.add_argument("--roots", nargs="+", required=True)
     parser.add_argument("--action-key", default="action")
+    parser.add_argument("--hf-cache-dir", default=None, help="Optional Hugging Face datasets cache dir.")
     return parser.parse_args()
 
 
@@ -44,12 +45,22 @@ def main() -> None:
     if len(args.repo_ids) != len(args.roots):
         raise ValueError("--repo-ids and --roots must have the same length")
 
+    from datamil_pi0.env import LocalLeRobotDatasetError
+    from datamil_pi0.env import configure_hf_datasets_cache
+    from datamil_pi0.env import local_lerobot_error_message
+
+    datasets_cache = configure_hf_datasets_cache(args.hf_cache_dir)
+    print(f"HF_DATASETS_CACHE={datasets_cache}")
+
     import lerobot.common.datasets.lerobot_dataset as lerobot_dataset
 
     for repo_id, root in tqdm.tqdm(zip(args.repo_ids, args.roots, strict=True)):
-        meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id, root=root)
-        delta_timestamps = {args.action_key: [t / meta.fps for t in range(50)]}
-        dataset = lerobot_dataset.LeRobotDataset(repo_id, root=root, delta_timestamps=delta_timestamps)
+        try:
+            meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id, root=root)
+            delta_timestamps = {args.action_key: [t / meta.fps for t in range(50)]}
+            dataset = lerobot_dataset.LeRobotDataset(repo_id, root=root, delta_timestamps=delta_timestamps)
+        except Exception as exc:
+            raise LocalLeRobotDatasetError(local_lerobot_error_message(repo_id, root, exc)) from exc
         sample = dataset[0]
         flat = flatten_dict(sample)
         print(f"\nrepo_id: {repo_id}")

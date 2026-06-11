@@ -10,6 +10,9 @@ import numpy as np
 import torch
 
 from datamil_pi0.configs import TrainConfig
+from datamil_pi0.env import LocalLeRobotDatasetError
+from datamil_pi0.env import configure_hf_datasets_cache
+from datamil_pi0.env import local_lerobot_error_message
 from datamil_pi0.model.observation import Observation
 from datamil_pi0.transforms import load_norm_stats
 from datamil_pi0.transforms import make_libero_transforms
@@ -205,23 +208,35 @@ class Pi0TrainLoader:
 
 
 def create_raw_lerobot_dataset(config: TrainConfig, repo_index: int):
+    configure_hf_datasets_cache()
     import lerobot.common.datasets.lerobot_dataset as lerobot_dataset
 
     repo_id = config.data.repo_ids[repo_index]
     root = config.data.roots[repo_index]
-    if root is None:
-        meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id)
-        dataset = lerobot_dataset.LeRobotDataset(
-            repo_id,
-            delta_timestamps={key: [t / meta.fps for t in range(config.model.action_horizon)] for key in config.data.action_sequence_keys},
-        )
-    else:
-        meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id, root=root)
-        dataset = lerobot_dataset.LeRobotDataset(
-            repo_id,
-            root=root,
-            delta_timestamps={key: [t / meta.fps for t in range(config.model.action_horizon)] for key in config.data.action_sequence_keys},
-        )
+    try:
+        if root is None:
+            meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id)
+            dataset = lerobot_dataset.LeRobotDataset(
+                repo_id,
+                delta_timestamps={
+                    key: [t / meta.fps for t in range(config.model.action_horizon)]
+                    for key in config.data.action_sequence_keys
+                },
+            )
+        else:
+            meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id, root=root)
+            dataset = lerobot_dataset.LeRobotDataset(
+                repo_id,
+                root=root,
+                delta_timestamps={
+                    key: [t / meta.fps for t in range(config.model.action_horizon)]
+                    for key in config.data.action_sequence_keys
+                },
+            )
+    except Exception as exc:
+        if root is not None:
+            raise LocalLeRobotDatasetError(local_lerobot_error_message(repo_id, root, exc)) from exc
+        raise
     if config.data.prompt_from_task:
         from datamil_pi0.transforms import PromptFromLeRobotTask
         from datamil_pi0.transforms import Compose
