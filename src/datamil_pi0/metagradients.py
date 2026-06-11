@@ -451,6 +451,162 @@ def candidate_train_step(
     return FunctionalState(params=params, adam=adam)
 
 
+def candidate_train_step_vjp(
+    *,
+    model: torch.nn.Module,
+    state: FunctionalState,
+    buffers: OrderedDict[str, torch.Tensor],
+    candidate_loader,
+    device: torch.device,
+    selected_episode_to_pos: dict[int, int],
+    selected_weights: torch.Tensor,
+    candidate_episode_to_pos: dict[int, int],
+    candidate_weights: torch.Tensor,
+    config: TrainConfig,
+    lr: float,
+    candidate_batches: int | None,
+    cotangents: tuple[torch.Tensor, ...],
+    debug_memory: bool = False,
+    debug_label: str = "candidate_vjp",
+) -> tuple[tuple[torch.Tensor, ...], torch.Tensor]:
+    if hasattr(candidate_loader, "sample_count"):
+        total_count = int(candidate_loader.sample_count(candidate_batches))
+    else:
+        total_count = 0
+    if hasattr(candidate_loader, "__len__"):
+        loader_batches = len(candidate_loader)
+        total_batches = loader_batches if candidate_batches is None else min(int(candidate_batches), loader_batches)
+    else:
+        total_batches = candidate_batches
+    if total_count == 0 and total_batches == 0:
+        raise ValueError("No candidate batches were produced.")
+
+    params_tuple = tuple(state.params.values())
+    start_tensors = state_tensors(state)
+    grad_sums: list[torch.Tensor | None] = [None for _ in params_tuple]
+    candidate_iter = candidate_loader.one_pass()
+    if candidate_batches is not None:
+        candidate_iter = itertools.islice(candidate_iter, int(candidate_batches))
+    grad_pbar = tqdm.tqdm(
+        enumerate(candidate_iter),
+        total=total_batches,
+        desc=f"{debug_label} Candidate GradSums",
+        leave=False,
+    )
+    seen_count = 0
+    for batch_idx, (observation, actions, episode_indices) in grad_pbar:
+        batch_count = int(actions.shape[0])
+        if total_count == 0:
+            total_count += batch_count
+        seen_count += batch_count
+        grad_pbar.set_postfix_str(f"grad_sums batch={batch_idx} seen={seen_count}/{total_count}")
+        observation = tree_to_device(observation, device)
+        actions = actions.to(device=device, dtype=torch.float32)
+        episode_indices = episode_indices.to(device=device)
+        per_sample = functional_per_sample_loss(model, state.params, buffers, observation, actions)
+        batch_loss = episode_weighted_loss(
+            per_sample,
+            episode_indices,
+            selected_episode_to_pos=selected_episode_to_pos,
+            selected_weights=selected_weights,
+            candidate_episode_to_pos=candidate_episode_to_pos,
+            candidate_weights=candidate_weights.detach(),
+            prefer_candidate_weights=True,
+        )
+        loss = batch_loss * (float(per_sample.numel()) / float(total_count))
+        grads = torch.autograd.grad(loss, params_tuple, create_graph=False, allow_unused=True)
+        for idx, grad in enumerate(grads):
+            if grad is None:
+                continue
+            detached = grad.detach()
+            grad_sums[idx] = detached if grad_sums[idx] is None else grad_sums[idx] + detached
+        del observation, actions, episode_indices, per_sample, batch_loss, loss, grads
+    grad_pbar.close()
+    if seen_count == 0:
+        raise ValueError("No candidate batches were produced.")
+
+    grad_vars = tuple(
+        (torch.zeros_like(param) if grad is None else grad.to(device=device, dtype=param.dtype)).detach().requires_grad_(True)
+        for param, grad in zip(params_tuple, grad_sums, strict=True)
+    )
+    direct_state = FunctionalState(params=state.params, adam=state.adam)
+    direct_next_params, direct_next_adam = differentiable_adamw_step_from_grads(
+        direct_state.params,
+        direct_state.adam,
+        grad_vars,
+        config,
+        lr,
+    )
+    direct_next_state = FunctionalState(params=direct_next_params, adam=direct_next_adam)
+    direct_inputs = start_tensors + grad_vars
+    direct_grads = torch.autograd.grad(
+        state_tensors(direct_next_state),
+        direct_inputs,
+        grad_outputs=cotangents,
+        allow_unused=True,
+    )
+    start_direct_grads = direct_grads[: len(start_tensors)]
+    grad_cotangents = tuple(
+        torch.zeros_like(grad_var) if grad is None else grad.detach()
+        for grad, grad_var in zip(direct_grads[len(start_tensors) :], grad_vars, strict=True)
+    )
+    start_accums = [
+        torch.zeros_like(tensor) if grad is None else grad.detach()
+        for tensor, grad in zip(start_tensors, start_direct_grads, strict=True)
+    ]
+    candidate_cotangent = torch.zeros_like(candidate_weights)
+    del direct_next_state, direct_next_params, direct_next_adam, direct_grads, start_direct_grads, grad_vars
+    clear_cuda_cache(device, enabled=debug_memory)
+
+    candidate_iter = candidate_loader.one_pass()
+    if candidate_batches is not None:
+        candidate_iter = itertools.islice(candidate_iter, int(candidate_batches))
+    hvp_pbar = tqdm.tqdm(
+        enumerate(candidate_iter),
+        total=total_batches,
+        desc=f"{debug_label} Candidate HVP",
+        leave=False,
+    )
+    seen_count = 0
+    for batch_idx, (observation, actions, episode_indices) in hvp_pbar:
+        batch_count = int(actions.shape[0])
+        seen_count += batch_count
+        hvp_pbar.set_postfix_str(f"hvp batch={batch_idx} seen={seen_count}/{total_count}")
+        observation = tree_to_device(observation, device)
+        actions = actions.to(device=device, dtype=torch.float32)
+        episode_indices = episode_indices.to(device=device)
+        per_sample = functional_per_sample_loss(model, state.params, buffers, observation, actions)
+        batch_loss = episode_weighted_loss(
+            per_sample,
+            episode_indices,
+            selected_episode_to_pos=selected_episode_to_pos,
+            selected_weights=selected_weights,
+            candidate_episode_to_pos=candidate_episode_to_pos,
+            candidate_weights=candidate_weights,
+            prefer_candidate_weights=True,
+        )
+        loss = batch_loss * (float(per_sample.numel()) / float(total_count))
+        batch_grads = torch.autograd.grad(loss, params_tuple, create_graph=True, allow_unused=True)
+        scalar_terms = [
+            (grad * grad_cotangent.to(device=grad.device, dtype=grad.dtype)).sum()
+            for grad, grad_cotangent in zip(batch_grads, grad_cotangents, strict=True)
+            if grad is not None
+        ]
+        if scalar_terms:
+            scalar = torch.stack(scalar_terms).sum()
+            hvp_grads = torch.autograd.grad(scalar, params_tuple + (candidate_weights,), allow_unused=True)
+            for idx, grad in enumerate(hvp_grads[:-1]):
+                if grad is not None:
+                    start_accums[idx] = start_accums[idx] + grad.detach()
+            if hvp_grads[-1] is not None:
+                candidate_cotangent = candidate_cotangent + hvp_grads[-1].detach()
+            del scalar, hvp_grads
+        del observation, actions, episode_indices, per_sample, batch_loss, loss, batch_grads, scalar_terms
+    hvp_pbar.close()
+    log_memory(f"{debug_label} after_streaming_vjp", device, enabled=debug_memory)
+    return tuple(start_accums), candidate_cotangent
+
+
 def trajectory_layout(inner_train_steps: int, bob_steps: int) -> tuple[int, int, int]:
     if bob_steps <= 0:
         raise ValueError("bob_steps must be positive.")
@@ -626,6 +782,34 @@ def replay_backward_segment_one_step(
         backward_pbar.set_postfix_str(f"step={step} replay")
         print(f"[datamodel] tail_backward_step step={step}", flush=True)
         start_state = clone_functional_state(stage_states[step], device=device, requires_grad=True)
+        if step == candidate_step:
+            log_memory(f"tail_backward_step step={step} before_candidate_vjp", device, enabled=debug_memory)
+            backward_pbar.set_postfix_str(f"step={step} candidate_vjp")
+            cotangents, candidate_grad = candidate_train_step_vjp(
+                model=model,
+                state=start_state,
+                buffers=buffers,
+                candidate_loader=candidate_loader,
+                device=device,
+                selected_episode_to_pos=selected_episode_to_pos,
+                selected_weights=selected_weights,
+                candidate_episode_to_pos=candidate_episode_to_pos,
+                candidate_weights=candidate_weights,
+                config=config,
+                lr=lr_schedule(step),
+                candidate_batches=candidate_batches,
+                cotangents=cotangents,
+                debug_memory=debug_memory,
+                debug_label=f"tail_backward_step {step}->{step + 1} candidate_vjp",
+            )
+            candidate_cotangent = candidate_cotangent + candidate_grad.detach()
+            log_memory(f"tail_backward_step step={step} after_candidate_vjp", device, enabled=debug_memory)
+            del start_state, candidate_grad
+            if step + 1 in stage_states:
+                del stage_states[step + 1]
+            clear_cuda_cache(device, enabled=debug_memory)
+            backward_pbar.set_postfix_str(f"step={step} candidate_vjp done")
+            continue
         end_state = replay_segment(
             model=model,
             start_state=start_state,
