@@ -406,10 +406,36 @@ def strict_datamodel_scores(
     lr_schedule = make_lr_schedule(config)
 
     total_steps, candidate_step, _ = trajectory_layout(inner_train_steps, bob_steps)
-    save_points = make_save_points(total_steps, segment_size)
-    saved_states: dict[int, FunctionalState] = {0: detach_functional_state(state, device=torch.device("cpu"))}
-    current_state = state
-    for start, end in zip(save_points[:-1], save_points[1:], strict=True):
+
+    if candidate_step > 0:
+        pre_candidate_state = replay_segment(
+            model=model,
+            start_state=state,
+            buffers=buffers,
+            start_step=0,
+            end_step=candidate_step,
+            candidate_step=candidate_step,
+            train_loader=train_loader,
+            candidate_loader=candidate_loader,
+            device=device,
+            selected_episode_to_pos=selected_episode_to_pos,
+            selected_weights=selected_weights,
+            candidate_episode_to_pos=candidate_episode_to_pos,
+            candidate_weights=candidate_weights.detach(),
+            config=config,
+            lr_schedule=lr_schedule,
+            candidate_batches=candidate_batches,
+            create_graph=False,
+        )
+    else:
+        pre_candidate_state = state
+
+    tail_save_points = [candidate_step + point for point in make_save_points(total_steps - candidate_step, segment_size)]
+    saved_states: dict[int, FunctionalState] = {
+        candidate_step: detach_functional_state(pre_candidate_state, device=torch.device("cpu"))
+    }
+    current_state = pre_candidate_state
+    for start, end in zip(tail_save_points[:-1], tail_save_points[1:], strict=True):
         current_state = clone_functional_state(saved_states[start], device=device, requires_grad=True)
         current_state = replay_segment(
             model=model,
@@ -439,7 +465,7 @@ def strict_datamodel_scores(
     cotangents = tuple(torch.zeros_like(tensor) if grad is None else grad for tensor, grad in zip(final_tensors, final_grads, strict=True))
 
     candidate_cotangent = torch.zeros_like(candidate_weights)
-    for start, end in reversed(list(zip(save_points[:-1], save_points[1:], strict=True))):
+    for start, end in reversed(list(zip(tail_save_points[:-1], tail_save_points[1:], strict=True))):
         start_state = clone_functional_state(saved_states[start], device=device, requires_grad=True)
         end_state = replay_segment(
             model=model,

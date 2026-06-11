@@ -31,7 +31,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--include-index-path", default=None)
     parser.add_argument("--val-repo-index", type=int, default=-1)
     parser.add_argument("--inner-train-steps", type=int, default=100)
-    parser.add_argument("--bob-steps", type=int, default=10)
+    parser.add_argument(
+        "--bob-steps",
+        type=int,
+        default=10,
+        help="Octo-style tail window length. The candidate step is placed at inner_train_steps - bob_steps.",
+    )
     parser.add_argument("--segment-size", type=int, default=5)
     parser.add_argument("--val-steps", type=int, default=4)
     parser.add_argument("--candidate-batches", type=int, default=4)

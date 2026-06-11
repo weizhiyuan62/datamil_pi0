@@ -25,7 +25,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--include-index-path", default=None, help="Initial include_index.json. Only used for the first iteration.")
     parser.add_argument("--val-repo-index", type=int, default=-1, help="Repo index used to compute the reference gradient.")
     parser.add_argument("--inner-train-steps", type=int, default=None)
-    parser.add_argument("--bob-steps", type=int, default=100, help="Number of tail steps after the zero-weight candidate step.")
+    parser.add_argument(
+        "--bob-steps",
+        type=int,
+        default=100,
+        help="Octo-style tail window length. The candidate step is placed at inner_train_steps - bob_steps.",
+    )
     parser.add_argument("--segment-size", type=int, default=25, help="Replay segment size for PyTorch replay-VJP.")
     parser.add_argument("--val-steps", type=int, default=32)
     parser.add_argument("--candidate-batches", type=int, default=None)

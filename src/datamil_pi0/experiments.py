@@ -132,13 +132,13 @@ def default_include_index_path(common: CommonOverrides, *, datamodel_exp_name: s
 
 def candidate_indices(available_indices: Sequence[int], *, candidate_size: float, seed: int, job_id: int) -> list[int]:
     all_indices = np.asarray([int(i) for i in available_indices], dtype=np.int64)
+    rng = np.random.default_rng(seed + job_id)
     if candidate_size >= 1.0:
-        return all_indices.tolist()
+        return rng.permutation(all_indices).astype(int).tolist()
     if candidate_size <= 0.0:
         raise ValueError("--candidate-size must be in (0, 1].")
-    rng = np.random.default_rng(seed + job_id)
     num = max(1, int(round(len(all_indices) * candidate_size)))
-    return sorted(rng.choice(all_indices, size=num, replace=False).astype(int).tolist())
+    return rng.choice(all_indices, size=num, replace=False).astype(int).tolist()
 
 
 def torch_device(requested: str):
