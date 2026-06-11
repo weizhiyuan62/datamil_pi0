@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--datamodel-trainable-scope",
         choices=["action_head", "action_projections", "action_expert"],
-        default="action_head",
+        default="action_expert",        # use the whole model defaultly
         help="Trainable Pi0 scope for differentiable DataMIL inner updates.",
     )
     parser.add_argument("--debug-memory", action="store_true", help="Print DataMIL stage/step CUDA memory diagnostics.")

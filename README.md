@@ -163,9 +163,9 @@ python scripts/train_pi0_datamodel_libero.py \
   --repo-ids libero90_lerobot libero10_lerobot \
   --roots $SOURCE_ROOT $TARGET_ROOT \
   --action-key action \
-  --batch-size 32 \
+  --batch-size 2 \
   --num-workers 8 \
-  --inner-train-steps 10000 \
+  --inner-train-steps 1000 \
   --bob-steps 100 \
   --segment-size 25 \
   --val-steps 32 \
@@ -200,6 +200,7 @@ python scripts/select_pi0_datamodel_libero.py \
   --roots $SOURCE_ROOT $TARGET_ROOT \
   --action-key action \
   --datamodel-dir checkpoints/libero_cotrain_l450_test_50_50/datamil_pi0_libero/datamil \
+  --datamodel-trainable-scope action_projections\
   --topk 0.1
 ```
 

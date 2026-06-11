@@ -37,7 +37,7 @@ class LeRobotParquetDataset:
         root: str | Path,
         *,
         action_key: str = "action",
-        action_horizon: int = 50,
+        action_horizon: int = 15,
         cache_size: int = 16,
     ):
         self.repo_id = repo_id

@@ -60,6 +60,9 @@ def freeze_vlm_for_datamodel_selection(
     *,
     scope: str = "action_head",
 ) -> dict[str, int | list[str]]:
+    """
+    put params in scopes, after that, the model only use the 
+    """
     scopes = {
         "action_expert": DATAMODEL_ACTION_EXPERT_PREFIXES,
         "action_head": DATAMODEL_ACTION_HEAD_PREFIXES,

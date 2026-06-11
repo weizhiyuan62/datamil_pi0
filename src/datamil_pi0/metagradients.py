@@ -1,15 +1,17 @@
 from __future__ import annotations
+import sys
+
+import gc
+import torch
+import tqdm
+import numpy as np
+from torch.func import functional_call
 
 from collections import OrderedDict
 from collections.abc import Sequence
 from dataclasses import dataclass
-import gc
+
 from typing import Any
-
-import numpy as np
-import torch
-from torch.func import functional_call
-
 from datamil_pi0.configs import TrainConfig
 from datamil_pi0.data import tree_to_device
 from datamil_pi0.modeling import make_lr_schedule
@@ -19,7 +21,7 @@ def cuda_memory_line(device: torch.device) -> str:
     if device.type != "cuda" or not torch.cuda.is_available():
         return "cuda=unavailable"
     index = torch.cuda.current_device() if device.index is None else device.index
-    allocated = torch.cuda.memory_allocated(index) / 1024**3
+    allocated = torch.cuda.memory_allocated(index) / 1024**3            # KB -> MB -> GB (2**10**3)
     reserved = torch.cuda.memory_reserved(index) / 1024**3
     max_allocated = torch.cuda.max_memory_allocated(index) / 1024**3
     free, total = torch.cuda.mem_get_info(index)
@@ -446,7 +448,7 @@ def replay_segment(
         device,
         enabled=debug_memory,
     )
-    for step in range(start_step, end_step):
+    for step in tqdm.tqdm(range(start_step, end_step), desc=f"{stage_name} Forward"):
         if step == candidate_step:
             log_memory(f"{stage_name} step={step} kind=candidate before", device, enabled=debug_memory)
             state = candidate_train_step(
@@ -683,7 +685,7 @@ def strict_datamodel_scores(
         candidate_step: detach_functional_state(pre_candidate_state, device=torch.device("cpu"))
     }
     current_state = pre_candidate_state
-    for start, end in zip(tail_save_points[:-1], tail_save_points[1:], strict=True):
+    for start, end in tqdm.tqdm(zip(tail_save_points[:-1], tail_save_points[1:], strict=True), desc="Tail Forward Save"):
         print(f"[datamodel] tail_forward_save segment {start}->{end}", flush=True)
         current_state = clone_functional_state(saved_states[start], device=device, requires_grad=True)
         log_memory(f"tail_forward_save segment {start}->{end} after_state_clone", device, enabled=debug_memory)

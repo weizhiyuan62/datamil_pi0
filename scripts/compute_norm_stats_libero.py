@@ -204,7 +204,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repo-ids", nargs="+", required=True)
     parser.add_argument("--roots", nargs="+", required=True)
     parser.add_argument("--action-key", default="action")
-    parser.add_argument("--action-horizon", type=int, default=50)
+    parser.add_argument("--action-horizon", type=int, default=15)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--num-workers", type=int, default=8)
     parser.add_argument("--num-episodes", type=int, default=30, help="Sample this many episodes across all input datasets.")

@@ -53,7 +53,7 @@ class DatamodelSelectionArgs:
     low_percentile: float = 20.0
     high_percentile: float = 80.0
     no_inner_train: bool = False
-    trainable_scope: str = "action_head"
+    trainable_scope: str = "action_projections"
     debug_memory: bool = False
 
 
