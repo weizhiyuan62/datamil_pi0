@@ -176,12 +176,32 @@ python scripts/train_pi0_datamodel_libero.py \
 Output:
 
 ```text
-checkpoints/libero_cotrain_l450_test_50_50/datamil_pi0_libero/datamil/iter_<id>/
-  datamodels.npy
-  include_index.json
+checkpoints/libero_cotrain_l450_test_50_50/datamil_pi0_libero/datamil/
+  iter_<id>/
+    datamodels.npy
+    candidate_scores_compact.npy
+    candidate_scores.json
+    include_index.json
+  avg_datamodel.npy
+  avg_datamodel_compact.npy
+  selected_indices_topk0.1.npy
+  selected_indices_topk0.1.json
+  selection_summary.json
 ```
 
-`include_index.json` stores selected `episode_indices`.
+Each `iter_<id>` stores one datamodel estimate. After `--num-iters` finishes, the script averages nonzero candidate scores across iterations and writes Octo-style final selected episode indices.
+
+To aggregate an existing run without retraining:
+
+```bash
+python scripts/select_pi0_datamodel_libero.py \
+  --config-name libero_cotrain_l450_test_50_50 \
+  --repo-ids libero90_lerobot libero10_lerobot \
+  --roots $SOURCE_ROOT $TARGET_ROOT \
+  --action-key action \
+  --datamodel-dir checkpoints/libero_cotrain_l450_test_50_50/datamil_pi0_libero/datamil \
+  --topk 0.1
+```
 
 ## Stage 2: Train pi0 On Selected Data
 
@@ -195,7 +215,7 @@ python scripts/train_pi0_selected_libero.py \
   --repo-ids libero90_lerobot libero10_lerobot \
   --roots $SOURCE_ROOT $TARGET_ROOT \
   --action-key action \
-  --include-index-path checkpoints/libero_cotrain_l450_test_50_50/datamil_pi0_libero/datamil/iter_4/include_index.json \
+  --selected-indices-path checkpoints/libero_cotrain_l450_test_50_50/datamil_pi0_libero/datamil/selected_indices_topk0.1.npy \
   --batch-size 32 \
   --num-workers 8 \
   --train-steps 10000 \

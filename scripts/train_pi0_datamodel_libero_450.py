@@ -43,6 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--candidate-size", type=float, default=1.0)
     parser.add_argument("--low-percentile", type=float, default=20.0)
     parser.add_argument("--high-percentile", type=float, default=80.0)
+    parser.add_argument("--topk", type=float, default=0.1, help="Final top-k episode fraction after averaging all datamodel iterations.")
     parser.add_argument("--no-inner-train", action="store_true")
     parser.add_argument(
         "--datamodel-trainable-scope",
@@ -116,8 +117,13 @@ def main() -> None:
         last_output = run_datamodel_selection(run_args)
 
     if last_output is not None:
+        from datamil_pi0.selection import aggregate_datamodel_iterations
+
+        summary = aggregate_datamodel_iterations(last_output.parent, episode_subset, topk=args.topk)
         print(f"Final include_index: {last_output / 'include_index.json'}")
         print(f"Episode subset: {last_output / 'episode_subset.json'}")
+        print(f"Final selected indices: {summary['selected_indices_path']}")
+        print(f"Final selected include index: {summary['selected_include_index_path']}")
 
 
 if __name__ == "__main__":

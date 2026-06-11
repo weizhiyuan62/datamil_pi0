@@ -12,7 +12,7 @@ if str(SRC_ROOT) not in sys.path:
 
 from datamil_pi0.experiments import CommonOverrides  # noqa: E402
 
-def add_common_args(parser: argparse.ArgumentParser, *, default_exp_name: str) -> None:
+def add_common_args(parser: argparse.ArgumentParser, *, default_exp_name: str, require_pytorch_weight: bool = True) -> None:
     parser.add_argument("--config-name", default="libero_cotrain_l450_test_50_50")
     parser.add_argument("--exp-name", default=default_exp_name)
     parser.add_argument("--assets-base-dir", default=None)
@@ -25,7 +25,7 @@ def add_common_args(parser: argparse.ArgumentParser, *, default_exp_name: str) -
     parser.add_argument("--asset-id", default=None)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--num-workers", type=int, default=None)
-    parser.add_argument("--pytorch-weight-path", required=True)
+    parser.add_argument("--pytorch-weight-path", required=require_pytorch_weight)
     parser.add_argument("--pytorch-training-precision", choices=["bfloat16", "float32"], default=None)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--device", default="cuda")

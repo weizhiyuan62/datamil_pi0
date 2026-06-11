@@ -14,6 +14,7 @@ from _common import common_overrides  # noqa: E402
 from datamil_pi0.experiments import CommonOverrides  # noqa: E402
 from datamil_pi0.experiments import DatamodelSelectionArgs  # noqa: E402
 from datamil_pi0.experiments import SelectedTrainingArgs  # noqa: E402
+from datamil_pi0.experiments import make_config  # noqa: E402
 from datamil_pi0.experiments import run_datamodel_selection  # noqa: E402
 from datamil_pi0.experiments import run_selected_training  # noqa: E402
 
@@ -36,6 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--candidate-size", type=float, default=1.0)
     parser.add_argument("--low-percentile", type=float, default=20.0)
     parser.add_argument("--high-percentile", type=float, default=80.0)
+    parser.add_argument("--topk", type=float, default=0.1, help="Final top-k episode fraction after averaging all datamodel iterations.")
     parser.add_argument("--no-inner-train", action="store_true")
     parser.add_argument(
         "--datamodel-trainable-scope",
@@ -84,11 +86,20 @@ def main() -> None:
 
     if last_output is None:
         raise RuntimeError("--num-iters must be >= 1")
+    from datamil_pi0.data import build_episode_index
+    from datamil_pi0.data import create_raw_lerobot_dataset
+    from datamil_pi0.selection import aggregate_datamodel_iterations
+
+    config = make_config(datamodel_common)
+    selection_dataset = create_raw_lerobot_dataset(config, datamodel_common.selection_repo_index)
+    episode_ids = sorted(build_episode_index(selection_dataset))
+    summary = aggregate_datamodel_iterations(last_output.parent, episode_ids, topk=args.topk)
+
     selected_common = with_exp_name(datamodel_common, args.selected_exp_name)
     run_selected_training(
         SelectedTrainingArgs(
             common=selected_common,
-            include_index_path=str(last_output / "include_index.json"),
+            include_index_path=str(summary["selected_include_index_path"]),
             train_steps=args.train_steps,
             save_interval=args.save_interval,
             output_dir=args.selected_output_dir,
