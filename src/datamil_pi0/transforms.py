@@ -104,7 +104,13 @@ class RepackTransform:
 
     def __call__(self, data: dict) -> dict:
         flat_item = flatten_dict(data)
-        return tree_map(lambda key: _lookup_first(flat_item, key), self.structure)
+        return _repack_structure(flat_item, self.structure)
+
+
+def _repack_structure(flat_item: dict[str, Any], structure):
+    if isinstance(structure, dict):
+        return {key: _repack_structure(flat_item, value) for key, value in structure.items()}
+    return _lookup_first(flat_item, structure)
 
 
 @dataclasses.dataclass(frozen=True)
