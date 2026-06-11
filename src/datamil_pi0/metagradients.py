@@ -139,6 +139,16 @@ def differentiable_adamw_step(
     create_graph: bool = True,
 ) -> tuple[OrderedDict[str, torch.Tensor], AdamState]:
     grads = torch.autograd.grad(loss, tuple(params.values()), create_graph=create_graph, allow_unused=True)
+    return differentiable_adamw_step_from_grads(params, state, grads, config, lr)
+
+
+def differentiable_adamw_step_from_grads(
+    params: OrderedDict[str, torch.Tensor],
+    state: AdamState,
+    grads: Sequence[torch.Tensor | None],
+    config: TrainConfig,
+    lr: float,
+) -> tuple[OrderedDict[str, torch.Tensor], AdamState]:
     next_step = state.step + 1
     b1 = config.optimizer.b1
     b2 = config.optimizer.b2
@@ -273,19 +283,39 @@ def candidate_train_step(
     candidate_batches: int | None,
     create_graph: bool,
 ) -> FunctionalState:
-    loss = candidate_weighted_loss(
-        model,
-        state.params,
-        buffers,
-        candidate_loader,
-        device,
-        selected_episode_to_pos=selected_episode_to_pos,
-        selected_weights=selected_weights,
-        candidate_episode_to_pos=candidate_episode_to_pos,
-        candidate_weights=candidate_weights,
-        max_batches=candidate_batches,
-    )
-    params, adam = differentiable_adamw_step(state.params, state.adam, loss, config, lr, create_graph=create_graph)
+    batches = []
+    total_count = 0
+    for batch_idx, batch in enumerate(candidate_loader.one_pass()):
+        if candidate_batches is not None and batch_idx >= candidate_batches:
+            break
+        batches.append(batch)
+        total_count += int(batch[1].shape[0])
+    if not batches or total_count == 0:
+        raise ValueError("No candidate batches were produced.")
+
+    grad_sums: list[torch.Tensor | None] = [None for _ in state.params]
+    for observation, actions, episode_indices in batches:
+        observation = tree_to_device(observation, device)
+        actions = actions.to(device=device, dtype=torch.float32)
+        episode_indices = episode_indices.to(device=device)
+        per_sample = functional_per_sample_loss(model, state.params, buffers, observation, actions)
+        batch_loss = episode_weighted_loss(
+            per_sample,
+            episode_indices,
+            selected_episode_to_pos=selected_episode_to_pos,
+            selected_weights=selected_weights,
+            candidate_episode_to_pos=candidate_episode_to_pos,
+            candidate_weights=candidate_weights,
+            prefer_candidate_weights=True,
+        )
+        loss = batch_loss * (float(per_sample.numel()) / float(total_count))
+        grads = torch.autograd.grad(loss, tuple(state.params.values()), create_graph=create_graph, allow_unused=True)
+        for idx, grad in enumerate(grads):
+            if grad is None:
+                continue
+            grad_sums[idx] = grad if grad_sums[idx] is None else grad_sums[idx] + grad
+
+    params, adam = differentiable_adamw_step_from_grads(state.params, state.adam, grad_sums, config, lr)
     return FunctionalState(params=params, adam=adam)
 
 
