@@ -47,6 +47,8 @@ def parse_args() -> argparse.Namespace:
         help="Trainable Pi0 scope for differentiable DataMIL inner updates.",
     )
     parser.add_argument("--debug-memory", action="store_true", help="Print DataMIL stage/step CUDA memory diagnostics.")
+    parser.add_argument("--target-repo-index", type=int, default=-1)
+    parser.add_argument("--target-episodes-per-task", type=int, default=5)
     parser.add_argument("--train-steps", type=int, default=None)
     parser.add_argument("--save-interval", type=int, default=None)
     parser.add_argument("--log-interval", type=int, default=50)
@@ -88,8 +90,8 @@ def main() -> None:
 
     if last_output is None:
         raise RuntimeError("--num-iters must be >= 1")
-    from datamil_pi0.data import build_episode_index
-    from datamil_pi0.data import create_raw_lerobot_dataset
+    from datamil_pi0.dataset.loaders import build_episode_index
+    from datamil_pi0.dataset.loaders import create_raw_lerobot_dataset
     from datamil_pi0.selection import aggregate_datamodel_iterations
 
     config = make_config(datamodel_common)
@@ -102,6 +104,8 @@ def main() -> None:
         SelectedTrainingArgs(
             common=selected_common,
             include_index_path=str(summary["selected_include_index_path"]),
+            target_repo_index=args.target_repo_index,
+            target_episodes_per_task=args.target_episodes_per_task,
             train_steps=args.train_steps,
             save_interval=args.save_interval,
             output_dir=args.selected_output_dir,

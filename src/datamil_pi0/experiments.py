@@ -62,6 +62,8 @@ class DatamodelSelectionArgs:
 class SelectedTrainingArgs:
     common: CommonOverrides
     include_index_path: str
+    target_repo_index: int = -1
+    target_episodes_per_task: int | None = 5
     train_steps: int | None = None
     save_interval: int | None = None
     output_dir: str | None = None
@@ -209,11 +211,11 @@ def copy_norm_stats_for_run(config: TrainConfig, output_dir: Path) -> str:
 def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
     import torch
 
-    from datamil_pi0.data import create_indexed_loader
-    from datamil_pi0.data import create_indexed_frame_loader
-    from datamil_pi0.data import create_raw_lerobot_dataset
-    from datamil_pi0.data import create_weighted_source_train_loader
-    from datamil_pi0.data import build_episode_index
+    from datamil_pi0.dataset.loaders import build_episode_index
+    from datamil_pi0.dataset.loaders import create_indexed_frame_loader
+    from datamil_pi0.dataset.loaders import create_indexed_loader
+    from datamil_pi0.dataset.loaders import create_raw_lerobot_dataset
+    from datamil_pi0.dataset.loaders import create_weighted_source_train_loader
     from datamil_pi0.modeling import freeze_vlm_for_datamodel_selection
     from datamil_pi0.modeling import make_pi0_pytorch_model
     from datamil_pi0.metagradients import strict_datamodel_scores
@@ -412,16 +414,16 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
     import torch
     import tqdm
 
-    from datamil_pi0.data import create_mixed_train_loader
-    from datamil_pi0.data import create_raw_lerobot_dataset
-    from datamil_pi0.data import build_episode_index
-    from datamil_pi0.data import tree_to_device
+    from datamil_pi0.dataset.loaders import build_episode_index
+    from datamil_pi0.dataset.loaders import create_episode_cotrain_loader
+    from datamil_pi0.dataset.loaders import create_raw_lerobot_dataset
     from datamil_pi0.modeling import make_lr_schedule
     from datamil_pi0.modeling import make_pi0_pytorch_model
     from datamil_pi0.modeling import per_sample_loss
     from datamil_pi0.modeling import save_pi0_checkpoint
     from datamil_pi0.selection import load_include_indices
     from datamil_pi0.transforms import load_norm_stats
+    from datamil_pi0.utils import tree_to_device
 
     config = make_config(args.common)
     device = torch_device(args.common.device)
@@ -434,21 +436,6 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
     selection_dataset = create_raw_lerobot_dataset(config, args.common.selection_repo_index)
     episode_ids = sorted(build_episode_index(selection_dataset))
     selected_indices = load_include_indices(args.include_index_path, episode_ids)
-    with open(output_dir / "selected_training_info.json", "w") as f:
-        json.dump(
-            {
-                "stage": "selected_pi0_training",
-                "config_name": args.common.config_name,
-                "selection_unit": "episode",
-                "num_source_episodes": len(episode_ids),
-                "include_index_path": str(Path(args.include_index_path).expanduser().resolve()),
-                "num_selected": len(selected_indices),
-                "norm_stats_path": norm_stats_path,
-            },
-            f,
-            indent=2,
-        )
-
     model = make_pi0_pytorch_model(config, device)
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -458,14 +445,31 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
         weight_decay=config.optimizer.weight_decay,
     )
     lr_schedule = make_lr_schedule(config)
-    loader = create_mixed_train_loader(
+    loader, cotrain_info = create_episode_cotrain_loader(
         config,
-        selection_repo_index=args.common.selection_repo_index,
-        selected_indices=selected_indices,
+        source_repo_index=args.common.selection_repo_index,
+        source_episode_indices=selected_indices,
+        target_repo_index=args.target_repo_index,
+        target_episodes_per_task=args.target_episodes_per_task,
         batch_size=config.batch_size,
-        shuffle=True,
         seed=config.seed,
     )
+    with open(output_dir / "selected_training_info.json", "w") as f:
+        json.dump(
+            {
+                "stage": "selected_pi0_training",
+                "config_name": args.common.config_name,
+                "selection_unit": "episode",
+                "num_source_episodes": len(episode_ids),
+                "include_index_path": str(Path(args.include_index_path).expanduser().resolve()),
+                "num_selected": len(selected_indices),
+                "cotrain_sampling": cotrain_info,
+                "norm_stats_path": norm_stats_path,
+            },
+            f,
+            indent=2,
+        )
+
     norm_stats = load_norm_stats(config.norm_stats_path)
 
     train_steps = config.num_train_steps if args.train_steps is None else args.train_steps

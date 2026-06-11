@@ -23,6 +23,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--datamodel-exp-name", default="datamil_pi0_libero")
     parser.add_argument("--datamodel-job-id", type=int, default=0)
     parser.add_argument("--datamodel-output-dir", default=None)
+    parser.add_argument("--target-repo-index", type=int, default=-1)
+    parser.add_argument("--target-episodes-per-task", type=int, default=5)
     parser.add_argument("--train-steps", type=int, default=None)
     parser.add_argument("--save-interval", type=int, default=None)
     parser.add_argument("--output-dir", default=None)
@@ -48,6 +50,8 @@ def main() -> None:
         SelectedTrainingArgs(
             common=common,
             include_index_path=include_index_path,
+            target_repo_index=args.target_repo_index,
+            target_episodes_per_task=args.target_episodes_per_task,
             train_steps=args.train_steps,
             save_interval=args.save_interval,
             output_dir=args.output_dir,

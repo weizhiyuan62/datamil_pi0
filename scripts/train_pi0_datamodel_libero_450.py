@@ -74,8 +74,8 @@ def choose_episode_subset(all_episode_ids: list[int], *, num_episodes: int, seed
 
 def main() -> None:
     args = parse_args()
-    from datamil_pi0.data import build_episode_index
-    from datamil_pi0.data import create_raw_lerobot_dataset
+    from datamil_pi0.dataset.loaders import build_episode_index
+    from datamil_pi0.dataset.loaders import create_raw_lerobot_dataset
 
     common = common_overrides(args)
     config = make_config(common)

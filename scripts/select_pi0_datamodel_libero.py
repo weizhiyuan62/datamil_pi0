@@ -32,8 +32,8 @@ def main() -> None:
             payload = json.load(f)
         episode_ids = [int(i) for i in payload["episode_indices"]]
     else:
-        from datamil_pi0.data import build_episode_index
-        from datamil_pi0.data import create_raw_lerobot_dataset
+        from datamil_pi0.dataset.loaders import build_episode_index
+        from datamil_pi0.dataset.loaders import create_raw_lerobot_dataset
 
         common = common_overrides(args)
         config = make_config(common)

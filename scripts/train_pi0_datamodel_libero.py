@@ -81,8 +81,8 @@ def main() -> None:
         last_output = run_datamodel_selection(run_args)
 
     if last_output is not None:
-        from datamil_pi0.data import build_episode_index
-        from datamil_pi0.data import create_raw_lerobot_dataset
+        from datamil_pi0.dataset.loaders import build_episode_index
+        from datamil_pi0.dataset.loaders import create_raw_lerobot_dataset
         from datamil_pi0.selection import aggregate_datamodel_iterations
 
         config = make_config(common)

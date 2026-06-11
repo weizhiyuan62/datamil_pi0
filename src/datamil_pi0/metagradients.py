@@ -15,8 +15,8 @@ from dataclasses import dataclass
 
 from typing import Any
 from datamil_pi0.configs import TrainConfig
-from datamil_pi0.data import tree_to_device
 from datamil_pi0.modeling import make_lr_schedule
+from datamil_pi0.utils import tree_to_device
 
 
 def cuda_memory_line(device: torch.device) -> str:

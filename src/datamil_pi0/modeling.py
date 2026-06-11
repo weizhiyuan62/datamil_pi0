@@ -11,10 +11,10 @@ import safetensors.torch
 import torch
 
 from datamil_pi0.configs import TrainConfig
-from datamil_pi0.data import tree_to_device
 from datamil_pi0.model.config import Pi0Config
 from datamil_pi0.model.pi0 import PI0Pytorch
 from datamil_pi0.transforms import save_norm_stats
+from datamil_pi0.utils import tree_to_device
 
 
 def make_pi0_pytorch_model(config: TrainConfig, device: torch.device):
