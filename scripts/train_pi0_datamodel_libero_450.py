@@ -46,8 +46,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-inner-train", action="store_true")
     parser.add_argument(
         "--datamodel-trainable-scope",
-        choices=["action_projections", "action_expert"],
-        default="action_projections",
+        choices=["action_head", "action_projections", "action_expert"],
+        default="action_head",
         help="Trainable Pi0 scope for differentiable DataMIL inner updates.",
     )
     parser.add_argument(

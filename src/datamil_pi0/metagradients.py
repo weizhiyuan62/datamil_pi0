@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from collections.abc import Sequence
 from dataclasses import dataclass
+import gc
 from typing import Any
 
 import numpy as np
@@ -31,6 +32,13 @@ def cuda_memory_line(device: torch.device) -> str:
 def log_memory(label: str, device: torch.device, *, enabled: bool) -> None:
     if enabled:
         print(f"[datamodel-memory] {label} | {cuda_memory_line(device)}", flush=True)
+
+
+def clear_cuda_cache(device: torch.device, *, enabled: bool) -> None:
+    gc.collect()
+    if device.type == "cuda" and torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    log_memory("after_cache_clear", device, enabled=enabled)
 
 
 @dataclass
@@ -169,8 +177,7 @@ def differentiable_adamw_step_from_grads(
     lr: float,
 ) -> tuple[OrderedDict[str, torch.Tensor], AdamState]:
     next_step = state.step + 1
-    b1 = config.optimizer.b1
-    b2 = config.optimizer.b2
+    b1, b2 = datamil_adam_momenta(state.step, config)
     eps = config.optimizer.eps
     weight_decay = config.optimizer.weight_decay
     next_params: OrderedDict[str, torch.Tensor] = OrderedDict()
@@ -193,6 +200,14 @@ def differentiable_adamw_step_from_grads(
         next_nu[name] = nu
 
     return next_params, AdamState(step=next_step, mu=next_mu, nu=next_nu)
+
+
+def datamil_adam_momenta(step: int, config: TrainConfig) -> tuple[float, float]:
+    factor = 1.0 if step >= 25 else 0.85 + (1.0 - 0.85) * (float(step) / 25.0)
+    b1 = config.optimizer.b1 * factor
+    separation = (1.0 - config.optimizer.b1) / (1.0 - config.optimizer.b2)
+    b2 = 1.0 - (1.0 - b1) / separation
+    return b1, b2
 
 
 def validation_loss(
@@ -218,6 +233,46 @@ def validation_loss(
     if total_loss is None or total_count == 0:
         raise ValueError("No validation batches were produced.")
     return total_loss / total_count
+
+
+def validation_cotangents(
+    model: torch.nn.Module,
+    params: OrderedDict[str, torch.Tensor],
+    buffers: OrderedDict[str, torch.Tensor],
+    val_loader,
+    device: torch.device,
+    *,
+    val_steps: int,
+    debug_memory: bool = False,
+) -> tuple[tuple[torch.Tensor, ...], float]:
+    tensors = tuple(params.values())
+    grad_sums: list[torch.Tensor | None] = [None for _ in tensors]
+    total_loss = 0.0
+    total_count = 0
+    for step, (observation, actions, _) in enumerate(val_loader.one_pass()):
+        if step >= val_steps:
+            break
+        log_memory(f"validation_head val_batch={step} before_forward", device, enabled=debug_memory)
+        observation = tree_to_device(observation, device)
+        actions = actions.to(device=device, dtype=torch.float32)
+        losses = functional_per_sample_loss(model, params, buffers, observation, actions)
+        loss_sum = losses.sum()
+        log_memory(f"validation_head val_batch={step} after_forward", device, enabled=debug_memory)
+        grads = torch.autograd.grad(loss_sum, tensors, allow_unused=True)
+        log_memory(f"validation_head val_batch={step} after_grad", device, enabled=debug_memory)
+        for idx, grad in enumerate(grads):
+            if grad is None:
+                continue
+            grad_sums[idx] = grad.detach() if grad_sums[idx] is None else grad_sums[idx] + grad.detach()
+        total_loss += float(loss_sum.detach().cpu())
+        total_count += int(losses.numel())
+    if total_count == 0:
+        raise ValueError("No validation batches were produced.")
+    cotangents = tuple(
+        torch.zeros_like(tensor) if grad is None else grad / float(total_count)
+        for tensor, grad in zip(tensors, grad_sums, strict=True)
+    )
+    return cotangents, total_loss / float(total_count)
 
 
 def candidate_weighted_loss(
@@ -438,6 +493,107 @@ def replay_segment(
     return state
 
 
+def replay_backward_segment_one_step(
+    *,
+    model: torch.nn.Module,
+    saved_start_state: FunctionalState,
+    buffers: OrderedDict[str, torch.Tensor],
+    start_step: int,
+    end_step: int,
+    candidate_step: int,
+    train_loader,
+    candidate_loader,
+    device: torch.device,
+    selected_episode_to_pos: dict[int, int],
+    selected_weights: torch.Tensor,
+    candidate_episode_to_pos: dict[int, int],
+    candidate_weights: torch.Tensor,
+    config: TrainConfig,
+    lr_schedule,
+    candidate_batches: int | None,
+    cotangents: tuple[torch.Tensor, ...],
+    debug_memory: bool,
+) -> tuple[tuple[torch.Tensor, ...], torch.Tensor]:
+    stage_states: dict[int, FunctionalState] = {start_step: detach_functional_state(saved_start_state, device=torch.device("cpu"))}
+    for step in range(start_step, end_step):
+        state = clone_functional_state(stage_states[step], device=device, requires_grad=True)
+        next_state = replay_segment(
+            model=model,
+            start_state=state,
+            buffers=buffers,
+            start_step=step,
+            end_step=step + 1,
+            candidate_step=candidate_step,
+            train_loader=train_loader,
+            candidate_loader=candidate_loader,
+            device=device,
+            selected_episode_to_pos=selected_episode_to_pos,
+            selected_weights=selected_weights,
+            candidate_episode_to_pos=candidate_episode_to_pos,
+            candidate_weights=candidate_weights.detach(),
+            config=config,
+            lr_schedule=lr_schedule,
+            candidate_batches=candidate_batches,
+            create_graph=False,
+            stage_name=f"tail_backward_reforward {start_step}->{end_step} step={step}",
+            debug_memory=debug_memory,
+        )
+        stage_states[step + 1] = detach_functional_state(next_state, device=torch.device("cpu"))
+        del state, next_state
+        clear_cuda_cache(device, enabled=debug_memory)
+
+    candidate_cotangent = torch.zeros_like(candidate_weights)
+    for step in reversed(range(start_step, end_step)):
+        print(f"[datamodel] tail_backward_step step={step}", flush=True)
+        start_state = clone_functional_state(stage_states[step], device=device, requires_grad=True)
+        end_state = replay_segment(
+            model=model,
+            start_state=start_state,
+            buffers=buffers,
+            start_step=step,
+            end_step=step + 1,
+            candidate_step=candidate_step,
+            train_loader=train_loader,
+            candidate_loader=candidate_loader,
+            device=device,
+            selected_episode_to_pos=selected_episode_to_pos,
+            selected_weights=selected_weights,
+            candidate_episode_to_pos=candidate_episode_to_pos,
+            candidate_weights=candidate_weights,
+            config=config,
+            lr_schedule=lr_schedule,
+            candidate_batches=candidate_batches,
+            create_graph=True,
+            stage_name=f"tail_backward_step {step}->{step + 1}",
+            debug_memory=debug_memory,
+        )
+        end_tensors = state_tensors(end_state)
+        start_tensors = state_tensors(start_state)
+        log_memory(f"tail_backward_step step={step} before_vjp_grad", device, enabled=debug_memory)
+        grads = torch.autograd.grad(
+            end_tensors,
+            start_tensors + (candidate_weights,),
+            grad_outputs=cotangents,
+            allow_unused=True,
+        )
+        log_memory(f"tail_backward_step step={step} after_vjp_grad", device, enabled=debug_memory)
+        start_grads = grads[:-1]
+        candidate_grad = grads[-1]
+        if candidate_grad is not None:
+            candidate_cotangent = candidate_cotangent + candidate_grad.detach()
+        cotangents = tuple(
+            torch.zeros_like(tensor) if grad is None else grad.detach()
+            for tensor, grad in zip(start_tensors, start_grads, strict=True)
+        )
+        del start_state, end_state, end_tensors, start_tensors, grads, start_grads
+        if step + 1 in stage_states:
+            del stage_states[step + 1]
+        clear_cuda_cache(device, enabled=debug_memory)
+    del stage_states
+    clear_cuda_cache(device, enabled=debug_memory)
+    return cotangents, candidate_cotangent
+
+
 def make_save_points(total_steps: int, segment_size: int) -> list[int]:
     if segment_size <= 0:
         raise ValueError("segment_size must be positive.")
@@ -516,6 +672,8 @@ def strict_datamodel_scores(
             debug_memory=debug_memory,
         )
         print(f"[datamodel] pre_candidate_forward_only done 0->{candidate_step}", flush=True)
+        del state
+        clear_cuda_cache(device, enabled=debug_memory)
     else:
         pre_candidate_state = state
 
@@ -551,27 +709,37 @@ def strict_datamodel_scores(
             debug_memory=debug_memory,
         )
         saved_states[end] = detach_functional_state(current_state, device=torch.device("cpu"))
+        del current_state
+        current_state = saved_states[end]
+        clear_cuda_cache(device, enabled=debug_memory)
         log_memory(f"tail_forward_save segment {start}->{end} after_state_save_cpu", device, enabled=debug_memory)
 
     print("[datamodel] validation_head start", flush=True)
     final_state = clone_functional_state(saved_states[total_steps], device=device, requires_grad=True)
     log_memory("validation_head after_final_state_clone", device, enabled=debug_memory)
-    val_loss = validation_loss(model, final_state.params, buffers, val_loader, device, val_steps=val_steps)
-    log_memory("validation_head after_val_loss", device, enabled=debug_memory)
+    param_cotangents, val_loss_value = validation_cotangents(
+        model,
+        final_state.params,
+        buffers,
+        val_loader,
+        device,
+        val_steps=val_steps,
+        debug_memory=debug_memory,
+    )
     final_tensors = state_tensors(final_state)
-    final_grads = torch.autograd.grad(val_loss, final_tensors, allow_unused=True)
-    log_memory("validation_head after_final_grads", device, enabled=debug_memory)
-    cotangents = tuple(torch.zeros_like(tensor) if grad is None else grad for tensor, grad in zip(final_tensors, final_grads, strict=True))
-    print("[datamodel] validation_head done", flush=True)
+    cotangents = param_cotangents + tuple(torch.zeros_like(tensor) for tensor in tuple(final_state.adam.mu.values()) + tuple(final_state.adam.nu.values()))
+    log_memory("validation_head after_final_cotangents", device, enabled=debug_memory)
+    del final_state
+    clear_cuda_cache(device, enabled=debug_memory)
+    print(f"[datamodel] validation_head done val_loss={val_loss_value:.6f}", flush=True)
 
     candidate_cotangent = torch.zeros_like(candidate_weights)
     for start, end in reversed(list(zip(tail_save_points[:-1], tail_save_points[1:], strict=True))):
         print(f"[datamodel] tail_backward_replay segment {start}->{end}", flush=True)
-        start_state = clone_functional_state(saved_states[start], device=device, requires_grad=True)
-        log_memory(f"tail_backward_replay segment {start}->{end} after_start_state_clone", device, enabled=debug_memory)
-        end_state = replay_segment(
+        log_memory(f"tail_backward_replay segment {start}->{end} before_one_step_stage", device, enabled=debug_memory)
+        cotangents, segment_candidate_cotangent = replay_backward_segment_one_step(
             model=model,
-            start_state=start_state,
+            saved_start_state=saved_states[start],
             buffers=buffers,
             start_step=start,
             end_step=end,
@@ -586,29 +754,18 @@ def strict_datamodel_scores(
             config=config,
             lr_schedule=lr_schedule,
             candidate_batches=candidate_batches,
-            create_graph=True,
-            stage_name=f"tail_backward_replay {start}->{end}",
+            cotangents=cotangents,
             debug_memory=debug_memory,
         )
-        log_memory(f"tail_backward_replay segment {start}->{end} after_replay_segment", device, enabled=debug_memory)
-        end_tensors = state_tensors(end_state)
-        start_tensors = state_tensors(start_state)
-        log_memory(f"tail_backward_replay segment {start}->{end} before_vjp_grad", device, enabled=debug_memory)
-        grads = torch.autograd.grad(
-            end_tensors,
-            start_tensors + (candidate_weights,),
-            grad_outputs=cotangents,
-            allow_unused=True,
-        )
-        log_memory(f"tail_backward_replay segment {start}->{end} after_vjp_grad", device, enabled=debug_memory)
-        start_grads = grads[:-1]
-        candidate_grad = grads[-1]
-        if candidate_grad is not None:
-            candidate_cotangent = candidate_cotangent + candidate_grad.detach()
-        cotangents = tuple(
-            torch.zeros_like(tensor) if grad is None else grad.detach()
-            for tensor, grad in zip(start_tensors, start_grads, strict=True)
-        )
+        candidate_cotangent = candidate_cotangent + segment_candidate_cotangent
+        clear_cuda_cache(device, enabled=debug_memory)
 
     grads = candidate_cotangent.detach().cpu().numpy()
+    nonzero = int(np.count_nonzero(grads))
+    print(
+        "[datamodel] candidate_cotangent_stats "
+        f"num={grads.size} nonzero={nonzero} "
+        f"min={grads.min():.6e} max={grads.max():.6e} mean={grads.mean():.6e}",
+        flush=True,
+    )
     return {episode: float(grads[pos]) for episode, pos in candidate_episode_to_pos.items()}

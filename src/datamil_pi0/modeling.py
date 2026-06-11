@@ -50,14 +50,19 @@ DATAMODEL_ACTION_PROJECTION_PREFIXES = (
     "time_mlp_out.",
 )
 
+DATAMODEL_ACTION_HEAD_PREFIXES = (
+    "action_out_proj.",
+)
+
 
 def freeze_vlm_for_datamodel_selection(
     model: torch.nn.Module,
     *,
-    scope: str = "action_projections",
+    scope: str = "action_head",
 ) -> dict[str, int | list[str]]:
     scopes = {
         "action_expert": DATAMODEL_ACTION_EXPERT_PREFIXES,
+        "action_head": DATAMODEL_ACTION_HEAD_PREFIXES,
         "action_projections": DATAMODEL_ACTION_PROJECTION_PREFIXES,
     }
     if scope not in scopes:

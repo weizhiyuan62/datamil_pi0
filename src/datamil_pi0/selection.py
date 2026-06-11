@@ -40,7 +40,7 @@ def save_include_indices(path: str | os.PathLike, indices: Sequence[int]) -> Non
 def scores_to_array(scores: dict[int, float], available: int | Sequence[int]) -> np.ndarray:
     available_indices = _available_indices(available)
     size = max(available_indices, default=-1) + 1
-    out = np.zeros((size,), dtype=np.float32)
+    out = np.zeros((size,), dtype=np.float64)
     for index, score in scores.items():
         out[index] = score
     return out
@@ -79,3 +79,12 @@ def save_outputs(checkpoint_path: str | os.PathLike, scores: np.ndarray, selecte
     save_include_indices(path / "include_index.json", selected_indices)
     with open(path / "hparams_config.json", "w") as f:
         json.dump(config_dict, f, indent=2, default=str)
+
+
+def save_candidate_scores(checkpoint_path: str | os.PathLike, scores: dict[int, float]) -> None:
+    path = Path(checkpoint_path)
+    path.mkdir(parents=True, exist_ok=True)
+    ordered = sorted((int(index), float(score)) for index, score in scores.items())
+    np.save(path / "candidate_scores_compact.npy", np.asarray(ordered, dtype=np.float64))
+    with open(path / "candidate_scores.json", "w") as f:
+        json.dump({str(index): score for index, score in ordered}, f, indent=2)

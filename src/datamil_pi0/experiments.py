@@ -53,7 +53,7 @@ class DatamodelSelectionArgs:
     low_percentile: float = 20.0
     high_percentile: float = 80.0
     no_inner_train: bool = False
-    trainable_scope: str = "action_projections"
+    trainable_scope: str = "action_head"
     debug_memory: bool = False
 
 
@@ -171,6 +171,7 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
     from datamil_pi0.metagradients import strict_datamodel_scores
     from datamil_pi0.selection import load_include_indices
     from datamil_pi0.selection import save_outputs
+    from datamil_pi0.selection import save_candidate_scores
     from datamil_pi0.selection import scores_to_array
     from datamil_pi0.selection import select_by_percentile
 
@@ -297,7 +298,27 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
         candidate_batches=args.candidate_batches,
         debug_memory=args.debug_memory,
     )
+    save_candidate_scores(output_dir, score_dict)
     scores = scores_to_array(score_dict, episode_ids)
+    candidate_score_values = np.asarray(list(score_dict.values()), dtype=np.float64)
+    nonzero_candidate_scores = int(np.count_nonzero(candidate_score_values))
+    if candidate_score_values.size:
+        print(
+            "Candidate score stats: "
+            f"num={candidate_score_values.size}, "
+            f"nonzero={nonzero_candidate_scores}, "
+            f"min={candidate_score_values.min():.6e}, "
+            f"max={candidate_score_values.max():.6e}, "
+            f"mean={candidate_score_values.mean():.6e}",
+            flush=True,
+        )
+    if candidate_score_values.size and nonzero_candidate_scores == 0:
+        print(
+            "WARNING: all candidate datamodel scores are exactly zero. "
+            "This usually means the candidate-weight path is disconnected, no candidate batch was differentiated, "
+            "or the debug run only covered zero-impact candidate frames.",
+            flush=True,
+        )
     selected_after = select_by_percentile(
         scores,
         existing_indices=selected_indices,
