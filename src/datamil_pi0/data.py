@@ -160,6 +160,8 @@ class MixedDataset(torch.utils.data.Dataset):
 class IndexedPi0Loader:
     def __init__(self, dataset, batch_size: int, *, shuffle: bool, num_workers: int, seed: int):
         generator = torch.Generator().manual_seed(seed)
+        self._batch_size = int(batch_size)
+        self._drop_last = bool(shuffle)
         self._loader = torch.utils.data.DataLoader(
             dataset,
             batch_size=batch_size,
@@ -173,6 +175,24 @@ class IndexedPi0Loader:
     def __iter__(self) -> Iterator[tuple[Observation, torch.Tensor, torch.Tensor]]:
         while True:
             yield from self.one_pass()
+
+    def __len__(self) -> int:
+        return len(self._loader)
+
+    @property
+    def num_samples(self) -> int:
+        return len(self._loader.dataset)
+
+    def sample_count(self, max_batches: int | None = None) -> int:
+        dataset_len = self.num_samples
+        if max_batches is None:
+            if self._drop_last:
+                return (dataset_len // self._batch_size) * self._batch_size
+            return dataset_len
+        num_batches = min(max(0, int(max_batches)), len(self._loader))
+        if self._drop_last:
+            return min(num_batches * self._batch_size, (dataset_len // self._batch_size) * self._batch_size)
+        return min(num_batches * self._batch_size, dataset_len)
 
     def one_pass(self) -> Iterator[tuple[Observation, torch.Tensor, torch.Tensor]]:
         for batch in self._loader:

@@ -2,6 +2,7 @@ from __future__ import annotations
 import sys
 
 import gc
+import itertools
 import time
 import torch
 import tqdm
@@ -387,49 +388,42 @@ def candidate_train_step(
     debug_memory: bool = False,
     debug_label: str = "candidate",
 ) -> FunctionalState:
-    batches = []
-    total_count = 0
-    candidate_iter = iter(candidate_loader.one_pass())
-    fetch_pbar = tqdm.tqdm(
-        total=candidate_batches,
-        desc=f"{debug_label} Fetch Candidate",
-        leave=False,
-    )
-    batch_idx = 0
-    while candidate_batches is None or batch_idx < candidate_batches:
-        fetch_pbar.set_postfix_str(f"waiting batch={batch_idx}")
-        fetch_pbar.refresh()
-        fetch_start = time.perf_counter()
-        try:
-            batch = next(candidate_iter)
-        except StopIteration:
-            break
-        fetch_seconds = time.perf_counter() - fetch_start
-        batches.append(batch)
-        total_count += int(batch[1].shape[0])
-        fetch_pbar.set_postfix_str(f"got batch={batch_idx} {fetch_seconds:.2f}s {batch_summary(batch)}")
-        fetch_pbar.update(1)
-        batch_idx += 1
-    fetch_pbar.close()
-    if not batches or total_count == 0:
+    if hasattr(candidate_loader, "sample_count"):
+        total_count = int(candidate_loader.sample_count(candidate_batches))
+    else:
+        total_count = 0
+    if hasattr(candidate_loader, "__len__"):
+        loader_batches = len(candidate_loader)
+        total_batches = loader_batches if candidate_batches is None else min(int(candidate_batches), loader_batches)
+    else:
+        total_batches = candidate_batches
+    if total_count == 0 and total_batches == 0:
         raise ValueError("No candidate batches were produced.")
 
     grad_sums: list[torch.Tensor | None] = [None for _ in state.params]
-    micro_pbar = tqdm.tqdm(
-        enumerate(batches),
-        total=len(batches),
-        desc=f"{debug_label} Candidate Microbatch",
+    candidate_iter = candidate_loader.one_pass()
+    if candidate_batches is not None:
+        candidate_iter = itertools.islice(candidate_iter, int(candidate_batches))
+    pbar = tqdm.tqdm(
+        enumerate(candidate_iter),
+        total=total_batches,
+        desc=f"{debug_label} Candidate Streaming",
         leave=False,
     )
-    for microbatch_idx, (observation, actions, episode_indices) in micro_pbar:
-        micro_pbar.set_postfix_str(f"forward batch={microbatch_idx} {batch_summary((observation, actions, episode_indices))}")
-        log_memory(f"{debug_label} microbatch={microbatch_idx} before_forward", device, enabled=debug_memory)
+    seen_count = 0
+    for batch_idx, (observation, actions, episode_indices) in pbar:
+        batch_count = int(actions.shape[0])
+        if total_count == 0:
+            total_count += batch_count
+        seen_count += batch_count
+        pbar.set_postfix_str(f"forward batch={batch_idx} seen={seen_count}/{total_count} {batch_summary((observation, actions, episode_indices))}")
+        log_memory(f"{debug_label} microbatch={batch_idx} before_forward", device, enabled=debug_memory)
         observation = tree_to_device(observation, device)
         actions = actions.to(device=device, dtype=torch.float32)
         episode_indices = episode_indices.to(device=device)
         per_sample = functional_per_sample_loss(model, state.params, buffers, observation, actions)
-        log_memory(f"{debug_label} microbatch={microbatch_idx} after_forward", device, enabled=debug_memory)
-        micro_pbar.set_postfix_str(f"grad batch={microbatch_idx}")
+        log_memory(f"{debug_label} microbatch={batch_idx} after_forward", device, enabled=debug_memory)
+        pbar.set_postfix_str(f"grad batch={batch_idx} seen={seen_count}/{total_count}")
         batch_loss = episode_weighted_loss(
             per_sample,
             episode_indices,
@@ -441,12 +435,15 @@ def candidate_train_step(
         )
         loss = batch_loss * (float(per_sample.numel()) / float(total_count))
         grads = torch.autograd.grad(loss, tuple(state.params.values()), create_graph=create_graph, allow_unused=True)
-        log_memory(f"{debug_label} microbatch={microbatch_idx} after_grad", device, enabled=debug_memory)
+        log_memory(f"{debug_label} microbatch={batch_idx} after_grad", device, enabled=debug_memory)
         for idx, grad in enumerate(grads):
             if grad is None:
                 continue
             grad_sums[idx] = grad if grad_sums[idx] is None else grad_sums[idx] + grad
-        micro_pbar.set_postfix_str(f"done batch={microbatch_idx}")
+        pbar.set_postfix_str(f"done batch={batch_idx} seen={seen_count}/{total_count}")
+    pbar.close()
+    if seen_count == 0:
+        raise ValueError("No candidate batches were produced.")
 
     log_memory(f"{debug_label} before_adamw", device, enabled=debug_memory)
     params, adam = differentiable_adamw_step_from_grads(state.params, state.adam, grad_sums, config, lr)
