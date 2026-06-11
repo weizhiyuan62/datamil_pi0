@@ -32,7 +32,7 @@ class Pi0Config:
     dtype: Literal["bfloat16", "float32"] = "bfloat16"
     paligemma_variant: GemmaVariant = "gemma_2b"
     action_expert_variant: GemmaVariant = "gemma_300m"
-    action_dim: int = 24
+    action_dim: int = 32
     action_horizon: int = 50
     max_token_len: int = 48
     pi05: bool = False
