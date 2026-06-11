@@ -2,6 +2,7 @@ from __future__ import annotations
 import sys
 
 import gc
+import time
 import torch
 import tqdm
 import numpy as np
@@ -34,6 +35,15 @@ def cuda_memory_line(device: torch.device) -> str:
 def log_memory(label: str, device: torch.device, *, enabled: bool) -> None:
     if enabled:
         print(f"[datamodel-memory] {label} | {cuda_memory_line(device)}", flush=True)
+
+
+def batch_summary(batch: tuple[Any, torch.Tensor, torch.Tensor]) -> str:
+    _, actions, episode_indices = batch
+    action_shape = tuple(actions.shape) if hasattr(actions, "shape") else tuple(np.asarray(actions).shape)
+    episodes = episode_indices.detach().cpu().reshape(-1).tolist() if isinstance(episode_indices, torch.Tensor) else np.asarray(episode_indices).reshape(-1).tolist()
+    preview = [int(x) for x in episodes[:6]]
+    suffix = "" if len(episodes) <= 6 else f"...(+{len(episodes) - 6})"
+    return f"shape={action_shape} episodes={preview}{suffix}"
 
 
 def clear_cuda_cache(device: torch.device, *, enabled: bool) -> None:
@@ -251,15 +261,23 @@ def validation_cotangents(
     grad_sums: list[torch.Tensor | None] = [None for _ in tensors]
     total_loss = 0.0
     total_count = 0
-    for step, (observation, actions, _) in enumerate(val_loader.one_pass()):
+    val_pbar = tqdm.tqdm(
+        enumerate(val_loader.one_pass()),
+        total=val_steps,
+        desc="validation_head",
+        leave=False,
+    )
+    for step, (observation, actions, episode_indices) in val_pbar:
         if step >= val_steps:
             break
+        val_pbar.set_postfix_str(f"forward val_batch={step} {batch_summary((observation, actions, episode_indices))}")
         log_memory(f"validation_head val_batch={step} before_forward", device, enabled=debug_memory)
         observation = tree_to_device(observation, device)
         actions = actions.to(device=device, dtype=torch.float32)
         losses = functional_per_sample_loss(model, params, buffers, observation, actions)
         loss_sum = losses.sum()
         log_memory(f"validation_head val_batch={step} after_forward", device, enabled=debug_memory)
+        val_pbar.set_postfix_str(f"grad val_batch={step}")
         grads = torch.autograd.grad(loss_sum, tensors, allow_unused=True)
         log_memory(f"validation_head val_batch={step} after_grad", device, enabled=debug_memory)
         for idx, grad in enumerate(grads):
@@ -268,6 +286,7 @@ def validation_cotangents(
             grad_sums[idx] = grad.detach() if grad_sums[idx] is None else grad_sums[idx] + grad.detach()
         total_loss += float(loss_sum.detach().cpu())
         total_count += int(losses.numel())
+        val_pbar.set_postfix_str(f"done val_batch={step}")
     if total_count == 0:
         raise ValueError("No validation batches were produced.")
     cotangents = tuple(
@@ -292,9 +311,16 @@ def candidate_weighted_loss(
 ) -> torch.Tensor:
     total_loss = None
     total_count = 0
-    for batch_idx, (observation, actions, episode_indices) in enumerate(candidate_loader.one_pass()):
+    pbar = tqdm.tqdm(
+        enumerate(candidate_loader.one_pass()),
+        total=max_batches,
+        desc="candidate_weighted_loss",
+        leave=False,
+    )
+    for batch_idx, (observation, actions, episode_indices) in pbar:
         if max_batches is not None and batch_idx >= max_batches:
             break
+        pbar.set_postfix_str(f"batch={batch_idx} {batch_summary((observation, actions, episode_indices))}")
         observation = tree_to_device(observation, device)
         actions = actions.to(device=device, dtype=torch.float32)
         episode_indices = episode_indices.to(device=device)
@@ -363,22 +389,47 @@ def candidate_train_step(
 ) -> FunctionalState:
     batches = []
     total_count = 0
-    for batch_idx, batch in enumerate(candidate_loader.one_pass()):
-        if candidate_batches is not None and batch_idx >= candidate_batches:
+    candidate_iter = iter(candidate_loader.one_pass())
+    fetch_pbar = tqdm.tqdm(
+        total=candidate_batches,
+        desc=f"{debug_label} Fetch Candidate",
+        leave=False,
+    )
+    batch_idx = 0
+    while candidate_batches is None or batch_idx < candidate_batches:
+        fetch_pbar.set_postfix_str(f"waiting batch={batch_idx}")
+        fetch_pbar.refresh()
+        fetch_start = time.perf_counter()
+        try:
+            batch = next(candidate_iter)
+        except StopIteration:
             break
+        fetch_seconds = time.perf_counter() - fetch_start
         batches.append(batch)
         total_count += int(batch[1].shape[0])
+        fetch_pbar.set_postfix_str(f"got batch={batch_idx} {fetch_seconds:.2f}s {batch_summary(batch)}")
+        fetch_pbar.update(1)
+        batch_idx += 1
+    fetch_pbar.close()
     if not batches or total_count == 0:
         raise ValueError("No candidate batches were produced.")
 
     grad_sums: list[torch.Tensor | None] = [None for _ in state.params]
-    for microbatch_idx, (observation, actions, episode_indices) in enumerate(batches):
+    micro_pbar = tqdm.tqdm(
+        enumerate(batches),
+        total=len(batches),
+        desc=f"{debug_label} Candidate Microbatch",
+        leave=False,
+    )
+    for microbatch_idx, (observation, actions, episode_indices) in micro_pbar:
+        micro_pbar.set_postfix_str(f"forward batch={microbatch_idx} {batch_summary((observation, actions, episode_indices))}")
         log_memory(f"{debug_label} microbatch={microbatch_idx} before_forward", device, enabled=debug_memory)
         observation = tree_to_device(observation, device)
         actions = actions.to(device=device, dtype=torch.float32)
         episode_indices = episode_indices.to(device=device)
         per_sample = functional_per_sample_loss(model, state.params, buffers, observation, actions)
         log_memory(f"{debug_label} microbatch={microbatch_idx} after_forward", device, enabled=debug_memory)
+        micro_pbar.set_postfix_str(f"grad batch={microbatch_idx}")
         batch_loss = episode_weighted_loss(
             per_sample,
             episode_indices,
@@ -395,6 +446,7 @@ def candidate_train_step(
             if grad is None:
                 continue
             grad_sums[idx] = grad if grad_sums[idx] is None else grad_sums[idx] + grad
+        micro_pbar.set_postfix_str(f"done batch={microbatch_idx}")
 
     log_memory(f"{debug_label} before_adamw", device, enabled=debug_memory)
     params, adam = differentiable_adamw_step_from_grads(state.params, state.adam, grad_sums, config, lr)
@@ -448,8 +500,15 @@ def replay_segment(
         device,
         enabled=debug_memory,
     )
-    for step in tqdm.tqdm(range(start_step, end_step), desc=f"{stage_name} Forward"):
+    forward_pbar = tqdm.tqdm(
+        range(start_step, end_step),
+        desc=f"{stage_name} Forward",
+        total=max(0, end_step - start_step),
+        leave=False,
+    )
+    for step in forward_pbar:
         if step == candidate_step:
+            forward_pbar.set_postfix_str(f"step={step} candidate")
             log_memory(f"{stage_name} step={step} kind=candidate before", device, enabled=debug_memory)
             state = candidate_train_step(
                 model=model,
@@ -469,6 +528,7 @@ def replay_segment(
                 debug_label=f"{stage_name} step={step} candidate",
             )
             log_memory(f"{stage_name} step={step} kind=candidate after", device, enabled=debug_memory)
+            forward_pbar.set_postfix_str(f"step={step} candidate done")
         else:
             regular_batch_index = regular_batch_index_for_step(step, candidate_step)
             log_memory(
@@ -476,7 +536,13 @@ def replay_segment(
                 device,
                 enabled=debug_memory,
             )
+            forward_pbar.set_postfix_str(f"step={step} waiting regular_batch={regular_batch_index}")
+            fetch_start = time.perf_counter()
             batch = train_loader.batch_at(regular_batch_index)
+            fetch_seconds = time.perf_counter() - fetch_start
+            forward_pbar.set_postfix_str(
+                f"step={step} got regular_batch={regular_batch_index} {fetch_seconds:.2f}s {batch_summary(batch)}"
+            )
             log_memory(f"{stage_name} step={step} kind=regular after_batch before_train", device, enabled=debug_memory)
             state = regular_train_step(
                 model=model,
@@ -491,6 +557,7 @@ def replay_segment(
                 create_graph=create_graph,
             )
             log_memory(f"{stage_name} step={step} kind=regular after_train", device, enabled=debug_memory)
+            forward_pbar.set_postfix_str(f"step={step} regular_train done")
     log_memory(f"{stage_name} done", device, enabled=debug_memory)
     return state
 
@@ -517,7 +584,14 @@ def replay_backward_segment_one_step(
     debug_memory: bool,
 ) -> tuple[tuple[torch.Tensor, ...], torch.Tensor]:
     stage_states: dict[int, FunctionalState] = {start_step: detach_functional_state(saved_start_state, device=torch.device("cpu"))}
-    for step in range(start_step, end_step):
+    reforward_pbar = tqdm.tqdm(
+        range(start_step, end_step),
+        desc=f"tail_backward_reforward {start_step}->{end_step}",
+        total=max(0, end_step - start_step),
+        leave=False,
+    )
+    for step in reforward_pbar:
+        reforward_pbar.set_postfix_str(f"step={step}")
         state = clone_functional_state(stage_states[step], device=device, requires_grad=True)
         next_state = replay_segment(
             model=model,
@@ -545,7 +619,14 @@ def replay_backward_segment_one_step(
         clear_cuda_cache(device, enabled=debug_memory)
 
     candidate_cotangent = torch.zeros_like(candidate_weights)
-    for step in reversed(range(start_step, end_step)):
+    backward_pbar = tqdm.tqdm(
+        reversed(range(start_step, end_step)),
+        desc=f"tail_backward_vjp {start_step}->{end_step}",
+        total=max(0, end_step - start_step),
+        leave=False,
+    )
+    for step in backward_pbar:
+        backward_pbar.set_postfix_str(f"step={step} replay")
         print(f"[datamodel] tail_backward_step step={step}", flush=True)
         start_state = clone_functional_state(stage_states[step], device=device, requires_grad=True)
         end_state = replay_segment(
@@ -572,6 +653,7 @@ def replay_backward_segment_one_step(
         end_tensors = state_tensors(end_state)
         start_tensors = state_tensors(start_state)
         log_memory(f"tail_backward_step step={step} before_vjp_grad", device, enabled=debug_memory)
+        backward_pbar.set_postfix_str(f"step={step} vjp_grad")
         grads = torch.autograd.grad(
             end_tensors,
             start_tensors + (candidate_weights,),
@@ -591,6 +673,7 @@ def replay_backward_segment_one_step(
         if step + 1 in stage_states:
             del stage_states[step + 1]
         clear_cuda_cache(device, enabled=debug_memory)
+        backward_pbar.set_postfix_str(f"step={step} done")
     del stage_states
     clear_cuda_cache(device, enabled=debug_memory)
     return cotangents, candidate_cotangent
@@ -685,7 +768,8 @@ def strict_datamodel_scores(
         candidate_step: detach_functional_state(pre_candidate_state, device=torch.device("cpu"))
     }
     current_state = pre_candidate_state
-    for start, end in tqdm.tqdm(zip(tail_save_points[:-1], tail_save_points[1:], strict=True), desc="Tail Forward Save"):
+    tail_pairs = list(zip(tail_save_points[:-1], tail_save_points[1:], strict=True))
+    for start, end in tqdm.tqdm(tail_pairs, desc="Tail Forward Save", total=len(tail_pairs)):
         print(f"[datamodel] tail_forward_save segment {start}->{end}", flush=True)
         current_state = clone_functional_state(saved_states[start], device=device, requires_grad=True)
         log_memory(f"tail_forward_save segment {start}->{end} after_state_clone", device, enabled=debug_memory)
@@ -736,7 +820,7 @@ def strict_datamodel_scores(
     print(f"[datamodel] validation_head done val_loss={val_loss_value:.6f}", flush=True)
 
     candidate_cotangent = torch.zeros_like(candidate_weights)
-    for start, end in reversed(list(zip(tail_save_points[:-1], tail_save_points[1:], strict=True))):
+    for start, end in tqdm.tqdm(reversed(tail_pairs), desc="Tail Backward Replay", total=len(tail_pairs)):
         print(f"[datamodel] tail_backward_replay segment {start}->{end}", flush=True)
         log_memory(f"tail_backward_replay segment {start}->{end} before_one_step_stage", device, enabled=debug_memory)
         cotangents, segment_candidate_cotangent = replay_backward_segment_one_step(
