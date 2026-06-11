@@ -171,11 +171,22 @@ def sample_candidate_frame_indices(
 
     rng = np.random.default_rng(seed + job_id)
     valid_episodes = np.asarray(list(valid_episode_frames), dtype=np.int64)
-    sampled_episodes = rng.choice(valid_episodes, size=int(candidate_num), replace=True)
     frame_indices: list[int] = []
+
+    for episode in valid_episodes:
+        frames = valid_episode_frames[int(episode)]
+        frame_indices.append(int(frames[int(rng.integers(0, len(frames)))]))
+
+    remaining = int(candidate_num) - len(frame_indices)
+    if remaining < 0:
+        rng.shuffle(frame_indices)
+        return frame_indices[: int(candidate_num)]
+
+    sampled_episodes = rng.choice(valid_episodes, size=remaining, replace=True)
     for episode in sampled_episodes:
         frames = valid_episode_frames[int(episode)]
         frame_indices.append(int(frames[int(rng.integers(0, len(frames)))]))
+    rng.shuffle(frame_indices)
     return frame_indices
 
 
@@ -306,8 +317,8 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
                 "num_candidate_action_chunks": len(candidate_frame_indices),
                 "candidate_num": args.candidate_num,
                 "candidate_sampling": (
-                    "sample episodes first, then sample valid frame/action_chunk starts within episode; "
-                    "sampled chunks share episode weights"
+                    "sample one valid frame/action_chunk start per candidate episode first, then randomly fill "
+                    "the remaining fixed candidate_num budget; sampled chunks share episode weights"
                 ),
                 "bob_steps": args.bob_steps,
                 "segment_size": args.segment_size,
