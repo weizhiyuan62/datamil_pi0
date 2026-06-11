@@ -13,6 +13,13 @@ source .venv/bin/activate
 python scripts/patch_transformers.py
 ```
 
+If this environment was patched by an older version of this repo and `transformers.models.auto` is missing, restore transformers once before patching:
+
+```bash
+uv pip install --force-reinstall 'transformers==4.53.2'
+python scripts/patch_transformers.py
+```
+
 Put the tokenizer at:
 
 ```text

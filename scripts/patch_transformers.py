@@ -18,11 +18,24 @@ def main() -> None:
     package_root = Path(datamil_pi0.__file__).resolve().parent
     src = package_root / "model" / "transformers_replace"
     dst = Path(transformers.__file__).resolve().parent
-    for item in src.iterdir():
-        target = dst / item.name
-        if target.exists():
-            shutil.rmtree(target) if target.is_dir() else target.unlink()
-        shutil.copytree(item, target) if item.is_dir() else shutil.copy2(item, target)
+    if not (dst / "models" / "auto").exists():
+        raise RuntimeError(
+            f"{dst / 'models' / 'auto'} is missing. The transformers package was likely corrupted by an older "
+            "patch script. Restore it first with:\n"
+            "  uv pip install --force-reinstall 'transformers==4.53.2'\n"
+            "Then rerun:\n"
+            "  python scripts/patch_transformers.py"
+        )
+    for item in src.rglob("*"):
+        if "__pycache__" in item.parts or item.suffix == ".pyc":
+            continue
+        relative = item.relative_to(src)
+        target = dst / relative
+        if item.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(item, target)
     print(f"patched transformers at {dst}")
 
 
