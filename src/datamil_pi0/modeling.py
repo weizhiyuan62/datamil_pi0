@@ -29,6 +29,46 @@ def make_pi0_pytorch_model(config: TrainConfig, device: torch.device):
     return model
 
 
+DATAMODEL_ACTION_EXPERT_PREFIXES = (
+    "paligemma_with_expert.gemma_expert.",
+    "action_in_proj.",
+    "action_out_proj.",
+    "state_proj.",
+    "action_time_mlp_in.",
+    "action_time_mlp_out.",
+    "time_mlp_in.",
+    "time_mlp_out.",
+)
+
+
+def freeze_vlm_for_datamodel_selection(model: torch.nn.Module) -> dict[str, int | list[str]]:
+    trainable_names: list[str] = []
+    frozen_names: list[str] = []
+    trainable_param_count = 0
+    frozen_param_count = 0
+    for name, param in model.named_parameters():
+        trainable = name.startswith(DATAMODEL_ACTION_EXPERT_PREFIXES)
+        param.requires_grad_(trainable)
+        if trainable:
+            trainable_names.append(name)
+            trainable_param_count += param.numel()
+        else:
+            frozen_names.append(name)
+            frozen_param_count += param.numel()
+
+    if not trainable_names:
+        raise ValueError("No datamodel trainable parameters matched action expert prefixes.")
+
+    return {
+        "scope": "action_expert_plus_action_projections",
+        "trainable_prefixes": list(DATAMODEL_ACTION_EXPERT_PREFIXES),
+        "num_trainable_tensors": len(trainable_names),
+        "num_frozen_tensors": len(frozen_names),
+        "num_trainable_params": trainable_param_count,
+        "num_frozen_params": frozen_param_count,
+    }
+
+
 def per_sample_loss(model: torch.nn.Module, observation: Any, actions: torch.Tensor) -> torch.Tensor:
     losses = model(observation, actions.to(torch.float32))
     if losses.ndim == 1:
@@ -118,4 +158,3 @@ def save_pi0_checkpoint(model, optimizer, config: TrainConfig, checkpoint_dir: s
 
         shutil.rmtree(ckpt_dir)
     tmp_dir.rename(ckpt_dir)
-

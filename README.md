@@ -109,6 +109,8 @@ pi0 DataMIL uses the same data-weight metagradient objective as the Octo impleme
 
 Stage 1 datamodel selection trains only on the source/prior dataset. The target dataset is used for validation gradients only.
 
+During datamodel selection, the VLM prefix is frozen. The replay-VJP inner loop only keeps the action expert and pi0 action-side projection/MLP parameters trainable. Stage 2 selected-data pi0 training is not frozen by this rule.
+
 Smoke first:
 
 ```bash
