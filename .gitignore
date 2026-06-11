@@ -21,3 +21,5 @@ datamil_old
 storage/
 assets/
 **.vscode**/
+
+third_party/

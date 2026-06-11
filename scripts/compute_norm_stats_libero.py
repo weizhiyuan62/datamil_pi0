@@ -187,6 +187,10 @@ def episode_to_frame_indices(dataset) -> dict[int, list[int]]:
 
 
 def parse_args() -> argparse.Namespace:
+    """
+    Parse command-line arguments.
+
+    """
     parser = argparse.ArgumentParser(description="Compute LIBERO state/action norm_stats.json for pi0 training.")
     parser.add_argument("--config-name", default="libero_cotrain_l450_test_50_50")
     parser.add_argument("--assets-base-dir", default=None)
@@ -260,6 +264,7 @@ def main() -> None:
     datasets = []
     candidate_episodes = []
 
+    # so can put a list of datasets as long as the lenth of the list of repo_ids and roots match
     for repo_id, root in zip(args.repo_ids, args.roots, strict=True):
         dataset = create_dataset(
             repo_id,

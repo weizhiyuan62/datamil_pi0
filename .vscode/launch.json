@@ -1,0 +1,37 @@
+{
+    /*
+        // env set for all debug configurations
+        export STORAGE_ROOT=/mnt/home/weizhiyuan/data/research_wzy/datamil_pi0/storage
+        export RAW_LIBERO_ROOT=$STORAGE_ROOT/libero/official_hdf5
+        export LEROBOT_ROOT=$STORAGE_ROOT/libero/official_lerobot
+        export SOURCE_ROOT=$LEROBOT_ROOT/libero90_lerobot
+        export TARGET_ROOT=$LEROBOT_ROOT/libero10_lerobot
+        export PI0_WEIGHT_PATH=/mnt/home/weizhiyuan/data/research_wzy/datamil_pi0/assets/pi0_droid_pytorch
+    */
+    "version": "0.2.0",
+    "configurations": [
+        /*
+        python scripts/check_libero_lerobot.py \
+            --repo-ids libero90_lerobot libero10_lerobot \
+            --roots $SOURCE_ROOT $TARGET_ROOT \
+            --action-key action
+        */
+        {
+            "name": "debug: ",
+            "type": "debugpy",
+            "python": "/mnt/home/weizhiyuan/data/research_wzy/datamil_pi0/.venv/bin/python",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/compute_norm_stats_libero.py",
+            "console": "integratedTerminal",
+            "args": ""
+        },
+
+        {
+            "name": "Python 调试程序: 当前文件",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal"
+        }
+    ]
+}
