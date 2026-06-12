@@ -201,23 +201,67 @@ python scripts/select_pi0_datamodel_libero.py \
   --roots $SOURCE_ROOT $TARGET_ROOT \
   --action-key action \
   --datamodel-dir checkpoints/libero_cotrain_l450_test_50_50/datamil_pi0_libero/datamil \
-  --datamodel-trainable-scope action_projections\
   --topk 0.1
 ```
 
-## Stage 2: Train pi0 On Selected Data
+## Stage 2: Fixed-Target Cotrain Experiments
 
-Stage 2 trains pi0 on the selected source episodes mixed with the target dataset according to `--dataset-weights`.
+For cotrain comparisons, first create one fixed LIBERO-10 target split. The split samples 5 episodes from each LIBERO-10 task with `--seed`, giving 50 target episodes for the official 10-task target set. The same target split should be reused across all cotrain runs.
+
+```bash
+python scripts/make_libero_cotrain_splits.py \
+  --config-name libero_cotrain_l450_test_50_50 \
+  --repo-ids libero90_lerobot libero10_lerobot \
+  --roots $SOURCE_ROOT $TARGET_ROOT \
+  --action-key action \
+  --seed 42 \
+  --target-episodes-per-task 5 \
+  --output-dir tmp/libero_cotrain_splits_seed42
+```
+
+Output:
+
+```text
+tmp/libero_cotrain_splits_seed42/
+  source_all_episodes.json
+  target_5_episodes_per_task_seed42.json
+  summary.json
+```
+
+Cotrain sampling is the same for both experiments: choose source or target according to `--dataset-weights` (use `0.5 0.5` for 1:1), then choose an episode uniformly from the chosen split, then choose a valid action chunk start uniformly inside that episode.
+
+Experiment A trains on full LIBERO-90 plus the fixed 50-episode LIBERO-10 target split (`4500 + 50 = 4550` episodes):
 
 ```bash
 python scripts/train_pi0_selected_libero.py \
   --config-name libero_cotrain_l450_test_50_50 \
-  --exp-name selected_pi0_libero \
+  --exp-name cotrain_full_libero90_plus_fixed_libero10_50 \
+  --pytorch-weight-path $PI0_WEIGHT_PATH \
+  --repo-ids libero90_lerobot libero10_lerobot \
+  --roots $SOURCE_ROOT $TARGET_ROOT \
+  --action-key action \
+  --selected-indices-path tmp/libero_cotrain_splits_seed42/source_all_episodes.json \
+  --target-include-index-path tmp/libero_cotrain_splits_seed42/target_5_episodes_per_task_seed42.json \
+  --dataset-weights 0.5 0.5 \
+  --batch-size 32 \
+  --num-workers 8 \
+  --train-steps 10000 \
+  --save-interval 5000
+```
+
+Experiment B trains on DataMIL-selected LIBERO-90 episodes plus the same fixed 50-episode LIBERO-10 target split (`450 + 50 = 500` episodes when `--topk 0.1` is used on 4500 source episodes):
+
+```bash
+python scripts/train_pi0_selected_libero.py \
+  --config-name libero_cotrain_l450_test_50_50 \
+  --exp-name cotrain_selected450_plus_fixed_libero10_50 \
   --pytorch-weight-path $PI0_WEIGHT_PATH \
   --repo-ids libero90_lerobot libero10_lerobot \
   --roots $SOURCE_ROOT $TARGET_ROOT \
   --action-key action \
   --selected-indices-path checkpoints/libero_cotrain_l450_test_50_50/datamil_pi0_libero/datamil/selected_indices_topk0.1.npy \
+  --target-include-index-path tmp/libero_cotrain_splits_seed42/target_5_episodes_per_task_seed42.json \
+  --dataset-weights 0.5 0.5 \
   --batch-size 32 \
   --num-workers 8 \
   --train-steps 10000 \
@@ -227,14 +271,17 @@ python scripts/train_pi0_selected_libero.py \
 Output:
 
 ```text
-checkpoints/libero_cotrain_l450_test_50_50/selected_pi0_libero/<step>/
+checkpoints/libero_cotrain_l450_test_50_50/<exp_name>/<step>/
   model.safetensors
   optimizer.pt
   metadata.json
 ```
 
+Each run also writes `selected_training_info.json`, including the exact source episode list, target episode list, task counts, dataset weights, and sampling description.
+
 ## Notes
 
-- Current commands use full LIBERO-10 as target data.
+- DataMIL Stage 1 validation uses LIBERO-10 by default through `--val-repo-index -1`.
+- Stage 2 can use either `--target-episodes-per-task` sampling or a fixed `--target-include-index-path`; for controlled comparisons, prefer the fixed split.
 - For per-task DataMIL experiments, pass `--target-task <pattern>` during conversion to create a target root with one LIBERO-10 task.
 - This project has no OpenPI/Octo/JAX checkout dependency.

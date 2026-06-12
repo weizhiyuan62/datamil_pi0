@@ -64,6 +64,7 @@ class SelectedTrainingArgs:
     include_index_path: str
     target_repo_index: int = -1
     target_episodes_per_task: int | None = 5
+    target_include_index_path: str | None = None
     train_steps: int | None = None
     save_interval: int | None = None
     output_dir: str | None = None
@@ -436,6 +437,11 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
     selection_dataset = create_raw_lerobot_dataset(config, args.common.selection_repo_index)
     episode_ids = sorted(build_episode_index(selection_dataset))
     selected_indices = load_include_indices(args.include_index_path, episode_ids)
+    target_indices = None
+    if args.target_include_index_path is not None:
+        target_dataset = create_raw_lerobot_dataset(config, args.target_repo_index)
+        target_episode_ids = sorted(build_episode_index(target_dataset))
+        target_indices = load_include_indices(args.target_include_index_path, target_episode_ids)
     model = make_pi0_pytorch_model(config, device)
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -453,6 +459,7 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
         target_episodes_per_task=args.target_episodes_per_task,
         batch_size=config.batch_size,
         seed=config.seed,
+        target_episode_indices=target_indices,
     )
     with open(output_dir / "selected_training_info.json", "w") as f:
         json.dump(
@@ -462,6 +469,9 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
                 "selection_unit": "episode",
                 "num_source_episodes": len(episode_ids),
                 "include_index_path": str(Path(args.include_index_path).expanduser().resolve()),
+                "target_include_index_path": (
+                    None if args.target_include_index_path is None else str(Path(args.target_include_index_path).expanduser().resolve())
+                ),
                 "num_selected": len(selected_indices),
                 "cotrain_sampling": cotrain_info,
                 "norm_stats_path": norm_stats_path,

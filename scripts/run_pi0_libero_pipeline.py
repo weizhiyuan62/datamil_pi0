@@ -47,6 +47,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--debug-memory", action="store_true", help="Print DataMIL stage/step CUDA memory diagnostics.")
     parser.add_argument("--target-repo-index", type=int, default=-1)
     parser.add_argument("--target-episodes-per-task", type=int, default=5)
+    parser.add_argument(
+        "--target-include-index-path",
+        default=None,
+        help="Fixed target episode split JSON/NPY. If provided, overrides --target-episodes-per-task sampling.",
+    )
     parser.add_argument("--train-steps", type=int, default=None)
     parser.add_argument("--save-interval", type=int, default=None)
     parser.add_argument("--log-interval", type=int, default=50)
@@ -96,6 +101,7 @@ def main() -> None:
             include_index_path=str(last_output / "include_index.json"),
             target_repo_index=args.target_repo_index,
             target_episodes_per_task=args.target_episodes_per_task,
+            target_include_index_path=args.target_include_index_path,
             train_steps=args.train_steps,
             save_interval=args.save_interval,
             output_dir=args.selected_output_dir,

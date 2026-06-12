@@ -427,6 +427,7 @@ def create_episode_cotrain_loader(
     target_episodes_per_task: int | None,
     batch_size: int,
     seed: int,
+    target_episode_indices: Sequence[int] | None = None,
 ) -> tuple[Pi0TrainLoader, dict[str, Any]]:
     transform = make_transform(config)
     repo_count = len(config.data.repo_ids)
@@ -449,11 +450,19 @@ def create_episode_cotrain_loader(
     target_raw = create_raw_lerobot_dataset(config, target_repo_index)
     target_episode_to_frames = build_episode_index(target_raw)
     target_episode_to_task = episode_task_indices(target_raw, target_episode_to_frames)
-    target_episode_indices = sample_episodes_per_task(
-        target_episode_to_task,
-        episodes_per_task=target_episodes_per_task,
-        seed=seed,
-    )
+    if target_episode_indices is None:
+        target_episode_indices = sample_episodes_per_task(
+            target_episode_to_task,
+            episodes_per_task=target_episodes_per_task,
+            seed=seed,
+        )
+        target_episode_source = "sample_episodes_per_task"
+    else:
+        target_episode_indices = sorted(int(episode) for episode in target_episode_indices)
+        unknown_target_episodes = [episode for episode in target_episode_indices if episode not in target_episode_to_frames]
+        if unknown_target_episodes:
+            raise ValueError(f"Unknown target episode indices: {unknown_target_episodes[:10]}")
+        target_episode_source = "explicit_episode_indices"
     target_dataset = EpisodeChunkDataset(
         target_raw,
         transform,
@@ -491,6 +500,7 @@ def create_episode_cotrain_loader(
         "num_source_episodes": len(source_dataset.episode_indices),
         "num_target_episodes": len(target_dataset.episode_indices),
         "target_episodes_per_task": target_episodes_per_task,
+        "target_episode_source": target_episode_source,
         "target_task_counts": {str(task): int(count) for task, count in sorted(task_counts.items())},
         "dataset_weights": weights,
         "sampling": "choose dataset by dataset_weights, then choose episode uniformly, then choose a valid action_chunk start uniformly",
