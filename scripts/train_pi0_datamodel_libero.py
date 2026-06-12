@@ -11,7 +11,6 @@ if str(SCRIPT_DIR) not in sys.path:
 from _common import add_common_args  # noqa: E402
 from _common import common_overrides  # noqa: E402
 from datamil_pi0.experiments import DatamodelSelectionArgs  # noqa: E402
-from datamil_pi0.experiments import make_config  # noqa: E402
 from datamil_pi0.experiments import run_datamodel_selection  # noqa: E402
 
 
@@ -39,7 +38,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--candidate-num", type=int, default=100_000, help="Number of candidate action chunks sampled from candidate episodes.")
     parser.add_argument("--low-percentile", type=float, default=20.0)
     parser.add_argument("--high-percentile", type=float, default=80.0)
-    parser.add_argument("--topk", type=float, default=0.1, help="Final top-k episode fraction after averaging all datamodel iterations.")
     parser.add_argument("--no-inner-train", action="store_true")
     parser.add_argument(
         "--datamodel-trainable-scope",
@@ -81,17 +79,7 @@ def main() -> None:
         last_output = run_datamodel_selection(run_args)
 
     if last_output is not None:
-        from datamil_pi0.dataset.loaders import build_episode_index
-        from datamil_pi0.dataset.loaders import create_raw_lerobot_dataset
-        from datamil_pi0.selection import aggregate_datamodel_iterations
-
-        config = make_config(common)
-        selection_dataset = create_raw_lerobot_dataset(config, common.selection_repo_index)
-        episode_ids = sorted(build_episode_index(selection_dataset))
-        summary = aggregate_datamodel_iterations(last_output.parent, episode_ids, topk=args.topk)
-        print(f"Final include_index: {last_output / 'include_index.json'}")
-        print(f"Final selected indices: {summary['selected_indices_path']}")
-        print(f"Final selected include index: {summary['selected_include_index_path']}")
+        print(f"Final DataMIL include index: {last_output / 'include_index.json'}")
 
 
 if __name__ == "__main__":
