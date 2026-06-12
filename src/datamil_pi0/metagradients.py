@@ -191,7 +191,7 @@ def differentiable_adamw_step_from_grads(
 ) -> tuple[OrderedDict[str, torch.Tensor], AdamState]:
     next_step = state.step + 1
     b1, b2 = datamil_adam_momenta(state.step, config)
-    eps = config.optimizer.eps
+    eps_root = config.optimizer.eps_root
     weight_decay = config.optimizer.weight_decay
     next_params: OrderedDict[str, torch.Tensor] = OrderedDict()
     next_mu: OrderedDict[str, torch.Tensor] = OrderedDict()
@@ -205,7 +205,7 @@ def differentiable_adamw_step_from_grads(
         nu = b2 * state.nu[name] + (1.0 - b2) * grad.square()
         mu_hat = mu / (1.0 - b1**next_step)
         nu_hat = nu / (1.0 - b2**next_step)
-        update = mu_hat / (nu_hat.sqrt() + eps)
+        update = mu_hat * torch.rsqrt(nu_hat + eps_root)
         if weight_decay:
             update = update + weight_decay * param
         next_params[name] = param - lr * update
