@@ -163,7 +163,8 @@ python scripts/train_pi0_datamodel_libero.py \
   --repo-ids libero90_lerobot libero10_lerobot \
   --roots $SOURCE_ROOT $TARGET_ROOT \
   --action-key action \
-  --batch-size 2 \
+  --batch-size 8 \
+  --candidate-num 45000 \
   --num-workers 8 \
   --inner-train-steps 1000 \
   --bob-steps 100 \
