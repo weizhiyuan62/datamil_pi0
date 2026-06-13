@@ -21,9 +21,9 @@ class OptimizerConfig:
 
 @dataclass(frozen=True)
 class LRScheduleConfig:
-    warmup_steps: int = 1_000
+    warmup_steps: int = 400         
     peak_lr: float = 2.5e-5
-    decay_steps: int = 30_000
+    decay_steps: int = 10_000
     decay_lr: float = 2.5e-6
 
 
@@ -48,7 +48,7 @@ class TrainConfig:
     assets_base_dir: str = str(PACKAGE_ROOT / "assets")
     checkpoint_base_dir: str = "./checkpoints"
     seed: int = 42
-    batch_size: int = 32
+    batch_size: int = 8         # h100's max memory according to full params
     num_workers: int = 2
     num_train_steps: int = 10_000
     save_interval: int = 5_000

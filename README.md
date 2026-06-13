@@ -252,6 +252,7 @@ Cotrain sampling is the same for both experiments: choose source or target accor
 Experiment A trains on full LIBERO-90 plus the fixed 50-episode LIBERO-10 target split (`4500 + 50 = 4550` episodes):
 
 ```bash
+export CUDA_VISIBLE_DEVICES=0
 python scripts/train_pi0_selected_libero.py \
   --config-name libero_cotrain_l450_test_50_50 \
   --exp-name cotrain_full_libero90_plus_fixed_libero10_50 \
@@ -263,17 +264,19 @@ python scripts/train_pi0_selected_libero.py \
   --selected-indices-path assets/libero_cotrain_splits_seed42/source_all_episodes.json \
   --target-include-index-path assets/libero_cotrain_splits_seed42/target_5_episodes_per_task_seed42.json \
   --dataset-weights 0.5 0.5 \
-  --batch-size 32 \
+  --batch-size 8 \
   --num-workers 8 \
   --train-steps 10000 \
   --save-interval 5000 \
   --swanlab-project datamil-pi0 \
-  --swanlab-run-name cotrain_full_libero90_plus_fixed_libero10_50
+  --swanlab-run-name cotrain_full4500_fixed50 \
+  --output-dir checkpoints/libero_cotrain_l450_test_50_50/cotrain_full_libero90_plus_fixed_libero10_50_1
 ```
 
 Experiment B trains on DataMIL-selected LIBERO-90 episodes plus the same fixed 50-episode LIBERO-10 target split (`450 + 50 = 500` episodes when `--topk 0.1` is used on 4500 source episodes):
 
 ```bash
+export CUDA_VISIBLE_DEVICES=1
 python scripts/train_pi0_selected_libero.py \
   --config-name libero_cotrain_l450_test_50_50 \
   --exp-name cotrain_selected450_plus_fixed_libero10_50 \
@@ -285,12 +288,12 @@ python scripts/train_pi0_selected_libero.py \
   --selected-indices-path checkpoints/libero_cotrain_l450_test_50_50/datamil_pi0_libero/datamil/selected_indices_topk0.1.npy \
   --target-include-index-path assets/libero_cotrain_splits_seed42/target_5_episodes_per_task_seed42.json \
   --dataset-weights 0.5 0.5 \
-  --batch-size 32 \
+  --batch-size 8 \
   --num-workers 8 \
   --train-steps 10000 \
   --save-interval 5000 \
   --swanlab-project datamil-pi0 \
-  --swanlab-run-name cotrain_selected450_plus_fixed_libero10_50
+  --swanlab-run-name cotrain_selected_450fixed50
 ```
 
 Output:
