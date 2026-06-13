@@ -309,3 +309,30 @@ If SwanLab is not installed in the environment, either install it first or remov
 - Stage 2 can use either `--target-episodes-per-task` sampling or a fixed `--target-include-index-path`; for controlled comparisons, prefer the fixed split.
 - For per-task DataMIL experiments, pass `--target-task <pattern>` during conversion to create a target root with one LIBERO-10 task.
 - This project has no OpenPI/Octo/JAX checkout dependency.
+
+## LIBERO Inference Eval
+
+Evaluate a saved selected-training checkpoint directly in LIBERO simulation:
+
+```bash
+python scripts/eval_pi0_libero.py \
+  --checkpoint-dir checkpoints/libero_cotrain_l450_test_50_50/cotrain_selected450_plus_fixed_libero10_50/storage/<YYYYMMDD_HHMMSS>/5000 \
+  --task-suite-name libero_10 \
+  --num-trials-per-task 50 \
+  --replan-steps 5 \
+  --device cuda
+```
+
+For a quick smoke test:
+
+```bash
+python scripts/eval_pi0_libero.py \
+  --checkpoint-dir checkpoints/libero_cotrain_l450_test_50_50/cotrain_selected450_plus_fixed_libero10_50/storage/<YYYYMMDD_HHMMSS>/5000 \
+  --task-suite-name libero_10 \
+  --task-ids 0 \
+  --num-trials-per-task 1 \
+  --no-video \
+  --device cuda
+```
+
+The evaluator loads `model.safetensors`, reads the checkpoint-local `assets/<asset_id>/norm_stats.json`, unnormalizes predicted actions, and writes `libero_eval_<suite>.json` back into the checkpoint directory. The default `--state-format datamil` and `--gripper-conversion datamil` match this repo's official-LIBERO conversion path; use `openpi` / `none` only when evaluating checkpoints trained with OpenPI's original action/state convention.
