@@ -235,13 +235,13 @@ python scripts/make_libero_cotrain_splits.py \
   --action-key action \
   --seed 42 \
   --target-episodes-per-task 5 \
-  --output-dir tmp/libero_cotrain_splits_seed42
+  --output-dir assets/libero_cotrain_splits_seed42
 ```
 
 Output:
 
 ```text
-tmp/libero_cotrain_splits_seed42/
+assets/libero_cotrain_splits_seed42/
   source_all_episodes.json
   target_5_episodes_per_task_seed42.json
   summary.json
@@ -260,8 +260,8 @@ python scripts/train_pi0_selected_libero.py \
   --roots $SOURCE_ROOT $TARGET_ROOT \
   --action-key action \
   --norm-stats-path $TARGET_NORM_STATS_PATH \
-  --selected-indices-path tmp/libero_cotrain_splits_seed42/source_all_episodes.json \
-  --target-include-index-path tmp/libero_cotrain_splits_seed42/target_5_episodes_per_task_seed42.json \
+  --selected-indices-path assets/libero_cotrain_splits_seed42/source_all_episodes.json \
+  --target-include-index-path assets/libero_cotrain_splits_seed42/target_5_episodes_per_task_seed42.json \
   --dataset-weights 0.5 0.5 \
   --batch-size 32 \
   --num-workers 8 \
@@ -283,7 +283,7 @@ python scripts/train_pi0_selected_libero.py \
   --action-key action \
   --norm-stats-path $TARGET_NORM_STATS_PATH \
   --selected-indices-path checkpoints/libero_cotrain_l450_test_50_50/datamil_pi0_libero/datamil/selected_indices_topk0.1.npy \
-  --target-include-index-path tmp/libero_cotrain_splits_seed42/target_5_episodes_per_task_seed42.json \
+  --target-include-index-path assets/libero_cotrain_splits_seed42/target_5_episodes_per_task_seed42.json \
   --dataset-weights 0.5 0.5 \
   --batch-size 32 \
   --num-workers 8 \
