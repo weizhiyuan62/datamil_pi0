@@ -25,7 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="cuda")
-    parser.add_argument("--dtype", choices=["bfloat16", "float32"], default=None)
+    parser.add_argument("--dtype", choices=["bfloat16", "float32"], default='float32')
     parser.add_argument("--num-inference-steps", type=int, default=10)
     parser.add_argument("--real-action-dim", type=int, default=7)
     parser.add_argument("--output-path", default=None)
@@ -135,21 +135,23 @@ def main() -> None:
     from datamil_pi0.utils import tree_map
     from datamil_pi0.utils import tree_to_device
 
+    print(f"loading norm stats from {args.norm_stats_path}")
     checkpoint_dir = Path(args.checkpoint_dir).expanduser().resolve()
     norm_stats_path = find_norm_stats_path(checkpoint_dir, args.norm_stats_path)
     config = load_model_config(checkpoint_dir, dtype_override=args.dtype)
     norm_stats = load_norm_stats(norm_stats_path)
-
+    
     device = torch.device(args.device if torch.cuda.is_available() or args.device == "cpu" else "cpu")
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
-
+    print(f"loading dataset from {args.repo_id}")
     raw_dataset = LeRobotParquetDataset(
         args.repo_id,
         args.root,
         action_key=args.action_key,
         action_horizon=config.action_horizon,
     )
+
     frame_indices = select_valid_frame_indices(
         raw_dataset,
         action_horizon=config.action_horizon,
@@ -164,7 +166,7 @@ def main() -> None:
     )
     dataset = ChunkDataset(raw_dataset, transform, frame_indices)
     loader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=0, collate_fn=collate)
-
+    print(f"loading model from {checkpoint_dir}")
     model = PI0Pytorch(config).to(device)
     safetensors.torch.load_model(model, checkpoint_dir / "model.safetensors")
     model.eval()
@@ -196,6 +198,7 @@ def main() -> None:
         sum_dim_mse += mse.mean(axis=1).sum(axis=0)
         total_chunks += batch_chunks
 
+        print(f"Processing batch with {batch_chunks} chunks")
         for key, value in flow_breakdown.items():
             if key.startswith("loss_dim/"):
                 continue
