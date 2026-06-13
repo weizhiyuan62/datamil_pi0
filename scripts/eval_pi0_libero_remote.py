@@ -9,6 +9,7 @@ import math
 from pathlib import Path
 import sys
 from typing import Any
+from urllib import error
 from urllib import request
 
 import numpy as np
@@ -49,6 +50,7 @@ class RemotePolicyClient:
     def __init__(self, base_url: str, *, timeout_sec: float):
         self.base_url = base_url.rstrip("/")
         self.timeout_sec = float(timeout_sec)
+        self.opener = request.build_opener(request.ProxyHandler({}))
 
     def health(self) -> dict[str, Any]:
         return self._get_json("/health")
@@ -64,8 +66,12 @@ class RemotePolicyClient:
         return {"actions": np.asarray(response["actions"], dtype=np.float32)}
 
     def _get_json(self, path: str) -> dict[str, Any]:
-        with request.urlopen(self.base_url + path, timeout=self.timeout_sec) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        try:
+            with self.opener.open(self.base_url + path, timeout=self.timeout_sec) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"GET {self.base_url + path} failed with HTTP {exc.code}: {body}") from exc
 
     def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         data = json.dumps(payload).encode("utf-8")
@@ -75,8 +81,12 @@ class RemotePolicyClient:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with request.urlopen(req, timeout=self.timeout_sec) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        try:
+            with self.opener.open(req, timeout=self.timeout_sec) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"POST {self.base_url + path} failed with HTTP {exc.code}: {body}") from exc
 
 
 def eval_libero(args: argparse.Namespace) -> None:
