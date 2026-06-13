@@ -323,7 +323,12 @@ class WrappedDataset(torch.utils.data.Dataset):
 
 def make_transform(config: TrainConfig):
     norm_stats = load_norm_stats(config.norm_stats_path)
-    return make_libero_transforms(config.model, norm_stats, extra_delta_transform=config.data.extra_delta_transform)
+    return make_libero_transforms(
+        config.model,
+        norm_stats,
+        extra_delta_transform=config.data.extra_delta_transform,
+        action_normalization_mask=config.data.action_normalization_mask,
+    )
 
 
 def create_indexed_loader(

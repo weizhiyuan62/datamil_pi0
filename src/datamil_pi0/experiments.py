@@ -106,6 +106,7 @@ def make_config(overrides: CommonOverrides) -> TrainConfig:
             extra_delta_transform=data.extra_delta_transform,
             prompt_from_task=data.prompt_from_task,
             action_sequence_keys=(overrides.action_key,) if overrides.action_key is not None else data.action_sequence_keys,
+            action_normalization_mask=data.action_normalization_mask,
         )
         config = dataclasses.replace(config, data=data)
     elif overrides.action_key is not None:
@@ -293,7 +294,8 @@ def selected_train_step(
 ) -> dict[str, float]:
     import torch
 
-    from datamil_pi0.modeling import per_sample_loss
+    from datamil_pi0.modeling import action_loss_breakdown
+    from datamil_pi0.modeling import reduce_action_losses
     from datamil_pi0.utils import tree_to_device
 
     observation = tree_to_device(observation, device)
@@ -302,17 +304,22 @@ def selected_train_step(
     for group in optimizer.param_groups:
         group["lr"] = lr
 
-    loss = per_sample_loss(model, observation, actions).mean()
+    raw_losses = model(observation, actions)
+    loss = reduce_action_losses(model, raw_losses).mean()
     loss.backward()
     grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=config.optimizer.clip_gradient_norm)
     optimizer.step()
     optimizer.zero_grad(set_to_none=True)
 
-    return {
+    breakdown = action_loss_breakdown(model, raw_losses.detach())
+    metrics = {
         "train/loss": float(loss.detach().cpu()),
         "train/lr": float(lr),
         "train/grad_norm": float(grad_norm.detach().cpu() if hasattr(grad_norm, "detach") else grad_norm),
     }
+    for name, value in breakdown.items():
+        metrics[f"train/{name}"] = float(value.detach().cpu())
+    return metrics
 
 
 def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:

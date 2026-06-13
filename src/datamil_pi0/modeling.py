@@ -99,11 +99,46 @@ def freeze_vlm_for_datamodel_selection(
     }
 
 
-def per_sample_loss(model: torch.nn.Module, observation: Any, actions: torch.Tensor) -> torch.Tensor:
-    losses = model(observation, actions.to(torch.float32))
+def action_loss_dim(model: torch.nn.Module, losses: torch.Tensor) -> int:
+    configured_dim = getattr(getattr(model, "config", None), "action_loss_dim", None)
+    if configured_dim is None:
+        return int(losses.shape[-1])
+    return min(int(configured_dim), int(losses.shape[-1]))
+
+
+def reduce_action_losses(model: torch.nn.Module, losses: torch.Tensor) -> torch.Tensor:
     if losses.ndim == 1:
         return losses
+    losses = losses[..., : action_loss_dim(model, losses)]
     return losses.reshape(losses.shape[0], -1).mean(dim=1)
+
+
+def per_sample_loss(model: torch.nn.Module, observation: Any, actions: torch.Tensor) -> torch.Tensor:
+    losses = model(observation, actions.to(torch.float32))
+    return reduce_action_losses(model, losses)
+
+
+def action_loss_breakdown(model: torch.nn.Module, losses: torch.Tensor) -> dict[str, torch.Tensor]:
+    if losses.ndim == 1:
+        return {"loss": losses.mean(), "loss_full32": losses.mean()}
+    loss_dim = action_loss_dim(model, losses)
+    real_action_dim = min(7, int(losses.shape[-1]))
+    breakdown = {
+        "loss": losses[..., :loss_dim].mean(),
+        "loss_full32": losses.mean(),
+        "loss_real7": losses[..., :real_action_dim].mean(),
+    }
+    if real_action_dim >= 6:
+        breakdown["loss_continuous6"] = losses[..., :6].mean()
+    if real_action_dim > 6:
+        breakdown["loss_gripper"] = losses[..., 6:7].mean()
+    if losses.shape[-1] > real_action_dim:
+        breakdown["loss_pad"] = losses[..., real_action_dim:].mean()
+    dim_reduce_axes = tuple(range(losses.ndim - 1))
+    dim_losses = losses.mean(dim=dim_reduce_axes)
+    for dim, dim_loss in enumerate(dim_losses):
+        breakdown[f"loss_dim/dim_{dim:02d}"] = dim_loss
+    return breakdown
 
 
 def named_trainable_parameters(model: torch.nn.Module) -> dict[str, torch.nn.Parameter]:

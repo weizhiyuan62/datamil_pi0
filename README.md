@@ -103,6 +103,11 @@ python scripts/compute_norm_stats_libero.py \
 ```
 
 It samples 30 episodes across all input datasets and writes the `norm_stats.json` used by training.
+The default LIBERO pi0 config follows OpenPI's pi0 action layout: actions are normalized before zero-padding
+to the 32-dimensional pi0 action space, and the only intentional model-config difference is
+`action_horizon=15`. The converted LIBERO actions are already delta actions, so `extra_delta_transform=False`
+by default. If you manually enable `--extra-delta-transform`, use the same setting consistently for norm stats,
+DataMIL selection, and selected pi0 training.
 
 For the fixed-target cotrain experiments below, compute and use target-only normalization stats so both cotrain runs normalize with the same LIBERO-10 target distribution:
 
@@ -319,7 +324,7 @@ Selected pi0 training always writes local scalar logs to:
 checkpoints/libero_cotrain_l450_test_50_50/<exp_name>/storage/<YYYYMMDD_HHMMSS>/train_metrics.jsonl
 ```
 
-Each log row includes `train/loss`, `train/lr`, `train/grad_norm`, `train/step_time_sec`, and `train/global_step`. Passing `--swanlab-project` enables SwanLab logging for the same metrics; omit it to run without SwanLab.
+Each log row includes `train/loss`, `train/lr`, `train/grad_norm`, `train/step_time_sec`, and `train/global_step`. `train/loss` follows the OpenPI pi0 objective and averages the full padded 32-dimensional action loss. Diagnostic metrics such as `train/loss_real7`, `train/loss_continuous6`, `train/loss_gripper`, `train/loss_pad`, and `train/loss_dim/dim_XX` are also logged for loss-scale debugging. Passing `--swanlab-project` enables SwanLab logging for the same metrics; omit it to run without SwanLab.
 
 If SwanLab is not installed in the environment, either install it first or remove the two `--swanlab-*` arguments.
 

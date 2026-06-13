@@ -33,6 +33,7 @@ class Pi0Config:
     paligemma_variant: GemmaVariant = "gemma_2b"
     action_expert_variant: GemmaVariant = "gemma_300m"
     action_dim: int = 32
+    action_loss_dim: int | None = None
     action_horizon: int = 15
     max_token_len: int = 48
     pi05: bool = False

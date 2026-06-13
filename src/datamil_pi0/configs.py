@@ -37,6 +37,7 @@ class DataConfig:
     extra_delta_transform: bool = False
     prompt_from_task: bool = True
     action_sequence_keys: tuple[str, ...] = ("actions",)
+    action_normalization_mask: tuple[bool, ...] | None = None
 
 
 @dataclass(frozen=True)

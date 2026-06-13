@@ -117,6 +117,7 @@ def _repack_structure(flat_item: dict[str, Any], structure):
 class Normalize:
     norm_stats: dict[str, NormStats] | None
     use_quantiles: bool = False
+    action_normalization_mask: Sequence[bool] | None = None
 
     def __call__(self, data: dict) -> dict:
         if self.norm_stats is None:
@@ -133,10 +134,11 @@ class Normalize:
                 if stats.q01 is None or stats.q99 is None:
                     raise ValueError(f"Missing quantile stats for {key}")
                 q01, q99 = stats.q01[..., : x.shape[-1]], stats.q99[..., : x.shape[-1]]
-                flat[key] = (x - q01) / (q99 - q01 + 1e-6) * 2.0 - 1.0
+                normalized = (x - q01) / (q99 - q01 + 1e-6) * 2.0 - 1.0
             else:
                 mean, std = stats.mean[..., : x.shape[-1]], stats.std[..., : x.shape[-1]]
-                flat[key] = (x - mean) / (std + 1e-6)
+                normalized = (x - mean) / (std + 1e-6)
+            flat[key] = _apply_normalization_mask(key, x, normalized, self.action_normalization_mask)
         return unflatten_dict(flat)
 
 
@@ -222,7 +224,13 @@ class LiberoInputs:
         return inputs
 
 
-def make_libero_transforms(config: Pi0Config, norm_stats: dict[str, NormStats] | None, *, extra_delta_transform: bool):
+def make_libero_transforms(
+    config: Pi0Config,
+    norm_stats: dict[str, NormStats] | None,
+    *,
+    extra_delta_transform: bool,
+    action_normalization_mask: Sequence[bool] | None = None,
+):
     transforms: list[Callable[[dict], dict]] = [
         RepackTransform(
             {
@@ -245,12 +253,31 @@ def make_libero_transforms(config: Pi0Config, norm_stats: dict[str, NormStats] |
         transforms.append(DeltaActions(make_bool_mask(6, -1)))
     transforms.extend(
         [
-            Normalize(norm_stats, use_quantiles=False),
+            Normalize(norm_stats, use_quantiles=False, action_normalization_mask=action_normalization_mask),
             TokenizePrompt(PaligemmaTokenizer(config.max_token_len), discrete_state_input=config.discrete_state_input),
             PadStatesAndActions(config.action_dim),
         ]
     )
     return Compose(transforms)
+
+
+def _apply_normalization_mask(key: str, original: Any, normalized: Any, action_normalization_mask: Sequence[bool] | None):
+    if key != "actions" or action_normalization_mask is None:
+        return normalized
+    mask = np.asarray(action_normalization_mask, dtype=bool)
+    dims = min(mask.shape[-1], original.shape[-1])
+    if dims <= 0:
+        return normalized
+    if hasattr(normalized, "clone"):
+        import torch
+
+        out = normalized.clone()
+        torch_mask = torch.as_tensor(mask[:dims], device=out.device, dtype=torch.bool)
+        out[..., :dims] = torch.where(torch_mask, normalized[..., :dims], original[..., :dims])
+        return out
+    out = normalized.copy()
+    out[..., :dims] = np.where(mask[:dims], normalized[..., :dims], original[..., :dims])
+    return out
 
 
 def _lookup_first(flat_item: dict[str, Any], key_or_keys):

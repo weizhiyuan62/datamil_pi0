@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 from datamil_pi0.configs import TrainConfig
 from datamil_pi0.modeling import make_lr_schedule
+from datamil_pi0.modeling import reduce_action_losses
 from datamil_pi0.utils import tree_to_device
 
 
@@ -132,9 +133,7 @@ def functional_per_sample_loss(
     train: bool = False,
 ) -> torch.Tensor:
     losses = functional_call(model, (params, buffers), (observation, actions.to(torch.float32)), {"train": train}, strict=False)
-    if losses.ndim == 1:
-        return losses
-    return losses.reshape(losses.shape[0], -1).mean(dim=1)
+    return reduce_action_losses(model, losses)
 
 
 def episode_weighted_loss(
