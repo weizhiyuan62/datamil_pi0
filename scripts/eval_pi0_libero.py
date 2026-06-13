@@ -188,6 +188,8 @@ def eval_libero(args: argparse.Namespace) -> None:
     import torch
     import tqdm
     from datamil_pi0.transforms import resize_with_pad
+
+    patch_torch_load_for_libero_init_states(torch)
     from libero.libero import benchmark
 
     np.random.seed(args.seed)
@@ -312,6 +314,19 @@ def eval_libero(args: argparse.Namespace) -> None:
     summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False))
     logging.info("Wrote eval summary to %s", summary_path)
     logging.info("Total success rate: %.3f", summary["total_success_rate"])
+
+
+def patch_torch_load_for_libero_init_states(torch_module) -> None:
+    if getattr(torch_module.load, "_datamil_pi0_libero_compat", False):
+        return
+    original_load = torch_module.load
+
+    def load_with_legacy_default(*args, **kwargs):
+        kwargs.setdefault("weights_only", False)
+        return original_load(*args, **kwargs)
+
+    load_with_legacy_default._datamil_pi0_libero_compat = True
+    torch_module.load = load_with_legacy_default
 
 
 def max_steps_for_suite(task_suite_name: str) -> int:
