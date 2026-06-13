@@ -323,9 +323,11 @@ This keeps the training stack away from LIBERO's older simulation dependencies.
 In the model environment, no LIBERO dependencies are needed:
 
 ```bash
+# cotrain with selected 450 data
+export CUDA_VISIBLE_DEVICES=0
 python scripts/serve_pi0_policy.py \
-  --checkpoint-dir checkpoints/libero_cotrain_l450_test_50_50/cotrain_selected450_plus_fixed_libero10_50/storage/<YYYYMMDD_HHMMSS>/5000 \
-  --host 127.0.0.1 \
+  --checkpoint-dir checkpoints/libero_cotrain_l450_test_50_50/cotrain_selected450_plus_fixed_libero10_50/storage/20260613_112733/10000 \
+  --host 0.0.0.0 \
   --port 8000 \
   --device cuda
 ```
@@ -334,8 +336,10 @@ In the LIBERO simulation environment, install only the simulation-side dependenc
 
 ```bash
 # Use Python 3.11; the project metadata requires Python>=3.11.
-uv pip install -e ".[eval]"
+uv venv .venv-libero-eval --python 3.10
+source .venv-libero-eval/bin/activate
 git clone https://github.com/Lifelong-Robot-Learning/LIBERO.git third_party/LIBERO
+uv pip install -r third_party/LIBERO/requirements.txt
 uv pip install -e third_party/LIBERO
 export PYTHONPATH=$PWD/third_party/LIBERO:$PYTHONPATH
 ```
@@ -350,16 +354,18 @@ MuJoCo/OpenGL setup; otherwise keep the existing robosuite installation.
 On headless machines, set a MuJoCo backend before running eval, for example:
 
 ```bash
+source .venv-libero-eval/bin/activate
 export MUJOCO_GL=egl
 ```
 
 Then run remote LIBERO simulation eval from the LIBERO environment:
 
 ```bash
+CUDA_VISIBLE_DEVICES=0
 python scripts/eval_pi0_libero_remote.py \
   --policy-server-url http://127.0.0.1:8000 \
   --task-suite-name libero_10 \
-  --num-trials-per-task 50 \
+  --num-trials-per-task 30 \
   --replan-steps 5
 ```
 
