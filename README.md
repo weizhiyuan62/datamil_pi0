@@ -85,51 +85,24 @@ libero_90: 4500 episodes
 libero_10: 500 episodes
 ```
 
-## Compute Norm Stats
+## Norm Stats
 
-Run once after conversion:
+Selected pi0 cotrain computes norm stats automatically at the start of each run from the actual source and
+target episode sets used by that run. The stats are written to:
 
-```bash
-python scripts/compute_norm_stats_libero.py \
-  --config-name libero_cotrain_l450_test_50_50 \
-  --repo-ids libero90_lerobot libero10_lerobot \
-  --roots $SOURCE_ROOT $TARGET_ROOT \
-  --action-key action \
-  --action-horizon 15 \
-  --num-episodes 30 \
-  --seed 42 \
-  --batch-size 256 \
-  --num-workers 8
+```text
+<output_dir>/assets/<asset_id>/norm_stats.json
 ```
 
-It samples 30 episodes across all input datasets and writes the `norm_stats.json` used by training.
+and the same file is copied into every saved checkpoint for inference.
+
 The default LIBERO pi0 config follows OpenPI's pi0 action layout: actions are normalized before zero-padding
 to the 32-dimensional pi0 action space, and the only intentional model-config difference is
 `action_horizon=15`. The converted LIBERO actions are already delta actions, so `extra_delta_transform=False`
 by default. If you manually enable `--extra-delta-transform`, use the same setting consistently for norm stats,
 DataMIL selection, and selected pi0 training.
-
-For the fixed-target cotrain experiments below, compute one shared cotrain normalization file from the full
-LIBERO-90 source set plus the full LIBERO-10 target set. Reuse this same file for both the full-source baseline
-and the DataMIL-selected-source run, so the two runs differ only in which source episodes are sampled.
-
-```bash
-export COTRAIN_NORM_STATS_PATH=$STORAGE_ROOT/libero/norm_stats/libero90_libero10_cotrain/norm_stats.json
-
-python scripts/compute_norm_stats_libero.py \
-  --config-name libero_cotrain_l450_test_50_50 \
-  --repo-ids libero90_lerobot libero10_lerobot \
-  --roots $SOURCE_ROOT $TARGET_ROOT \
-  --action-key action \
-  --action-horizon 15 \
-  --num-episodes 500 \
-  --seed 42 \
-  --batch-size 256 \
-  --num-workers 8 \
-  --output-dir $(dirname $COTRAIN_NORM_STATS_PATH)
-```
-
-Training commands can override the config default with `--norm-stats-path $COTRAIN_NORM_STATS_PATH`.
+The standalone `scripts/compute_norm_stats_libero.py` remains available for debugging, but it is not required
+for the cotrain commands below.
 
 ## Stage 1: Datamodel Selection
 
@@ -269,7 +242,6 @@ python scripts/train_pi0_selected_libero.py \
   --repo-ids libero90_lerobot libero10_lerobot \
   --roots $SOURCE_ROOT $TARGET_ROOT \
   --action-key action \
-  --norm-stats-path $COTRAIN_NORM_STATS_PATH \
   --selected-indices-path assets/libero_cotrain_splits_seed42/source_all_episodes.json \
   --target-include-index-path assets/libero_cotrain_splits_seed42/target_5_episodes_per_task_seed42.json \
   --dataset-weights 0.5 0.5 \
@@ -293,7 +265,6 @@ python scripts/train_pi0_selected_libero.py \
   --repo-ids libero90_lerobot libero10_lerobot \
   --roots $SOURCE_ROOT $TARGET_ROOT \
   --action-key action \
-  --norm-stats-path $COTRAIN_NORM_STATS_PATH \
   --selected-indices-path checkpoints/libero_cotrain_l450_test_50_50/datamil_pi0_libero/datamil/selected_indices_topk0.1.npy \
   --target-include-index-path assets/libero_cotrain_splits_seed42/target_5_episodes_per_task_seed42.json \
   --dataset-weights 0.5 0.5 \

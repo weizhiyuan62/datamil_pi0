@@ -532,9 +532,13 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
     from datamil_pi0.dataset.loaders import build_episode_index
     from datamil_pi0.dataset.loaders import create_episode_cotrain_loader
     from datamil_pi0.dataset.loaders import create_raw_lerobot_dataset
+    from datamil_pi0.dataset.loaders import episode_task_indices
+    from datamil_pi0.dataset.loaders import sample_episodes_per_task
     from datamil_pi0.modeling import make_lr_schedule
     from datamil_pi0.modeling import make_pi0_pytorch_model
     from datamil_pi0.modeling import save_pi0_checkpoint
+    from datamil_pi0.norm_stats import compute_norm_stats_for_episode_sets
+    from datamil_pi0.norm_stats import write_norm_stats_payload
     from datamil_pi0.selection import load_include_indices
     from datamil_pi0.transforms import load_norm_stats
 
@@ -544,16 +548,47 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
     if output_dir.exists() and args.overwrite:
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    norm_stats_path = copy_norm_stats_for_run(config, output_dir)
 
     selection_dataset = create_raw_lerobot_dataset(config, args.common.selection_repo_index)
     episode_ids = sorted(build_episode_index(selection_dataset))
     selected_indices = load_include_indices(args.include_index_path, episode_ids)
-    target_indices = None
+
+    target_dataset = create_raw_lerobot_dataset(config, args.target_repo_index)
+    target_episode_to_frames = build_episode_index(target_dataset)
+    target_episode_ids = sorted(target_episode_to_frames)
     if args.target_include_index_path is not None:
-        target_dataset = create_raw_lerobot_dataset(config, args.target_repo_index)
-        target_episode_ids = sorted(build_episode_index(target_dataset))
         target_indices = load_include_indices(args.target_include_index_path, target_episode_ids)
+        target_episode_source = "explicit_episode_indices"
+    else:
+        target_episode_to_task = episode_task_indices(target_dataset, target_episode_to_frames)
+        target_indices = sample_episodes_per_task(
+            target_episode_to_task,
+            episodes_per_task=args.target_episodes_per_task,
+            seed=config.seed,
+        )
+        target_episode_source = "sample_episodes_per_task"
+
+    if config.norm_stats_path_override is None:
+        norm_payload, norm_compute_info = compute_norm_stats_for_episode_sets(
+            datasets=[
+                (config.data.repo_ids[args.common.selection_repo_index % len(config.data.repo_ids)], selection_dataset, selected_indices),
+                (config.data.repo_ids[args.target_repo_index % len(config.data.repo_ids)], target_dataset, target_indices),
+            ],
+            action_key=config.data.action_sequence_keys[0],
+            action_horizon=config.model.action_horizon,
+            extra_delta_transform=config.data.extra_delta_transform,
+            batch_size=max(1, config.batch_size * 8),
+            num_workers=config.num_workers,
+        )
+        norm_stats_path = write_norm_stats_payload(output_dir / "assets" / config.data.asset_id, norm_payload)
+        config = dataclasses.replace(config, norm_stats_path_override=str(norm_stats_path))
+    else:
+        norm_stats_path = copy_norm_stats_for_run(config, output_dir)
+        norm_compute_info = {
+            "mode": "manual_override",
+            "source_path": norm_stats_path,
+        }
+
     model = make_pi0_pytorch_model(config, device)
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -573,6 +608,7 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
         seed=config.seed,
         target_episode_indices=target_indices,
     )
+    cotrain_info["target_episode_source"] = target_episode_source
     run_info = {
         "stage": "selected_pi0_training",
         "config_name": args.common.config_name,
@@ -587,6 +623,7 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
         "num_selected": len(selected_indices),
         "cotrain_sampling": cotrain_info,
         "norm_stats_path": norm_stats_path,
+        "norm_stats_compute_info": norm_compute_info,
         "swanlab_project": args.swanlab_project,
         "swanlab_run_name": args.swanlab_run_name,
     }
