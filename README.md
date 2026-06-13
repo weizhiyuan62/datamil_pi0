@@ -312,6 +312,22 @@ If SwanLab is not installed in the environment, either install it first or remov
 
 ## LIBERO Inference Eval
 
+The simulator eval requires the LIBERO benchmark package and robosuite stack. These are intentionally optional
+because training and chunk-level checkpoint checks do not need MuJoCo/LIBERO:
+
+```bash
+uv pip install -e ".[eval]"
+git clone https://github.com/Lifelong-Robot-Learning/LIBERO.git third_party/libero
+uv pip install -e third_party/libero
+export PYTHONPATH=$PYTHONPATH:$PWD/third_party/libero
+```
+
+On headless machines, set a MuJoCo backend before running eval, for example:
+
+```bash
+export MUJOCO_GL=egl
+```
+
 Evaluate a saved selected-training checkpoint directly in LIBERO simulation:
 
 ```bash
