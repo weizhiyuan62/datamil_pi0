@@ -24,6 +24,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-chunks", type=int, default=128)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--noise-seed", type=int, default=None, help="Base seed for deterministic per-frame generation noise.")
+    parser.add_argument(
+        "--stochastic-noise",
+        action="store_true",
+        help="Use model.sample_actions internal RNG noise. By default, noise is fixed per frame index so batch size does not change results.",
+    )
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--dtype", choices=["bfloat16", "float32"], default='float32')
     parser.add_argument("--num-inference-steps", type=int, default=10)
@@ -77,8 +83,13 @@ def select_valid_frame_indices(dataset, *, action_horizon: int, num_chunks: int,
     if not valid_frames:
         raise ValueError("No valid action chunks found for the configured horizon.")
     rng = np.random.default_rng(seed)
-    replace = len(valid_frames) < num_chunks
-    return rng.choice(np.asarray(valid_frames, dtype=np.int64), size=num_chunks, replace=replace).astype(int).tolist()
+    valid_array = np.asarray(valid_frames, dtype=np.int64)
+    if num_chunks <= len(valid_array):
+        order = rng.permutation(len(valid_array))[:num_chunks]
+        return valid_array[order].astype(int).tolist()
+    order = rng.permutation(len(valid_array))
+    extra = rng.choice(valid_array, size=num_chunks - len(valid_array), replace=True)
+    return np.concatenate([valid_array[order], extra]).astype(int).tolist()
 
 
 class ChunkDataset:
@@ -91,7 +102,10 @@ class ChunkDataset:
         return len(self.frame_indices)
 
     def __getitem__(self, index: int) -> dict[str, Any]:
-        return self.transform(self.dataset[self.frame_indices[index]])
+        frame_index = int(self.frame_indices[index])
+        item = self.transform(self.dataset[frame_index])
+        item["__frame_index__"] = np.asarray(frame_index, dtype=np.int64)
+        return item
 
 
 def collate(items):
@@ -119,6 +133,15 @@ def pad_to_dim(x: np.ndarray, target_dim: int, *, value: float) -> np.ndarray:
     return np.pad(x, pad_width, constant_values=value)
 
 
+def deterministic_noise_for_frame_indices(frame_indices, *, shape: tuple[int, ...], base_seed: int, torch_module, device):
+    noises = []
+    for frame_index in frame_indices.detach().cpu().numpy().reshape(-1):
+        generator = torch_module.Generator(device="cpu")
+        generator.manual_seed(int(base_seed) + int(frame_index))
+        noises.append(torch_module.randn(shape, generator=generator, dtype=torch_module.float32))
+    return torch_module.stack(noises, dim=0).to(device)
+
+
 def main() -> None:
     args = parse_args()
 
@@ -144,6 +167,7 @@ def main() -> None:
     device = torch.device(args.device if torch.cuda.is_available() or args.device == "cpu" else "cpu")
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
+    noise_seed = args.seed if args.noise_seed is None else int(args.noise_seed)
     print(f"loading dataset from {args.repo_id}")
     raw_dataset = LeRobotParquetDataset(
         args.repo_id,
@@ -180,11 +204,21 @@ def main() -> None:
 
     for batch in tqdm.tqdm(loader, desc="chunk mse"):
         batch = tree_map(torch.as_tensor, batch)
+        frame_index_batch = batch.pop("__frame_index__").to(torch.long)
         observation = tree_to_device(Observation.from_dict(batch), device)
         gt_actions_norm = batch["actions"].to(device=device, dtype=torch.float32)
 
         with torch.no_grad():
-            pred_actions_norm = model.sample_actions(device, observation, num_steps=args.num_inference_steps)
+            noise = None
+            if not args.stochastic_noise:
+                noise = deterministic_noise_for_frame_indices(
+                    frame_index_batch,
+                    shape=(config.action_horizon, config.action_dim),
+                    base_seed=noise_seed,
+                    torch_module=torch,
+                    device=device,
+                )
+            pred_actions_norm = model.sample_actions(device, observation, noise=noise, num_steps=args.num_inference_steps)
             raw_flow_losses = model(observation, gt_actions_norm, train=False)
             flow_breakdown = action_loss_breakdown(model, raw_flow_losses)
 
@@ -198,13 +232,14 @@ def main() -> None:
         sum_dim_mse += mse.mean(axis=1).sum(axis=0)
         total_chunks += batch_chunks
 
-        print(f"Processing batch with {batch_chunks} chunks")
         for key, value in flow_breakdown.items():
             if key.startswith("loss_dim/"):
                 continue
             flow_loss_accum[key] = flow_loss_accum.get(key, 0.0) + float(value.detach().cpu()) * batch_chunks
         flow_loss_count += batch_chunks
 
+    per_horizon_step = sum_step_mse / max(1, total_chunks)
+    best_horizon_index = int(np.argmin(per_horizon_step)) if len(per_horizon_step) else -1
     summary = {
         "checkpoint_dir": str(checkpoint_dir),
         "norm_stats_path": str(norm_stats_path),
@@ -214,10 +249,14 @@ def main() -> None:
         "real_action_dim": args.real_action_dim,
         "num_chunks": total_chunks,
         "num_inference_steps": args.num_inference_steps,
+        "noise_mode": "stochastic" if args.stochastic_noise else "deterministic_per_frame",
+        "noise_seed": None if args.stochastic_noise else noise_seed,
         "sampled_frame_indices": frame_indices,
         "generation_mse": {
             "mean": float(sum_step_dim_mse.sum() / max(1, total_chunks * config.action_horizon * args.real_action_dim)),
-            "per_horizon_step": (sum_step_mse / max(1, total_chunks)).tolist(),
+            "best_horizon_index": best_horizon_index,
+            "best_horizon_mse": float(per_horizon_step[best_horizon_index]) if best_horizon_index >= 0 else None,
+            "per_horizon_step": per_horizon_step.tolist(),
             "per_action_dim": (sum_dim_mse / max(1, total_chunks)).tolist(),
             "per_horizon_step_action_dim": (sum_step_dim_mse / max(1, total_chunks)).tolist(),
         },

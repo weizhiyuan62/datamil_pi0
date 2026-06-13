@@ -38,6 +38,7 @@ def parse_args() -> argparse.Namespace:
         help="datamil maps predicted gripper g in [0,1] back to LIBERO env action 1-2*g.",
     )
     parser.add_argument("--max-request-mb", type=float, default=32.0)
+    parser.add_argument("--log-prompts", type=int, default=5, help="Log the first N prompts received by /act.")
     return parser.parse_args()
 
 
@@ -45,6 +46,8 @@ class PolicyServerState:
     policy: LocalPi0LiberoPolicy | None = None
     info: dict[str, Any] = {}
     max_request_bytes: int = 32 * 1024 * 1024
+    log_prompts_remaining: int = 0
+    request_count: int = 0
 
 
 class PolicyRequestHandler(BaseHTTPRequestHandler):
@@ -85,6 +88,16 @@ class PolicyRequestHandler(BaseHTTPRequestHandler):
                 "prompt": str(payload["prompt"]),
             }
             result = PolicyServerState.policy.infer(element)
+            PolicyServerState.request_count += 1
+            if PolicyServerState.log_prompts_remaining > 0:
+                PolicyServerState.log_prompts_remaining -= 1
+                logging.info(
+                    "Policy request %s prompt=%r state_shape=%s actions_shape=%s",
+                    PolicyServerState.request_count,
+                    element["prompt"],
+                    tuple(element["observation/state"].shape),
+                    tuple(result["actions"].shape),
+                )
             self._write_json({"actions": result["actions"].tolist()})
         except KeyError as exc:
             self.send_error(400, f"missing request key: {exc}")
@@ -127,6 +140,7 @@ def main() -> None:
 
     PolicyServerState.policy = policy
     PolicyServerState.max_request_bytes = int(args.max_request_mb * 1024 * 1024)
+    PolicyServerState.log_prompts_remaining = max(0, int(args.log_prompts))
     PolicyServerState.info = {
         "checkpoint_dir": str(checkpoint_dir),
         "norm_stats_path": str(norm_stats_path),
