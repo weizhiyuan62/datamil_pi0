@@ -103,6 +103,25 @@ python scripts/compute_norm_stats_libero.py \
 
 It samples 30 episodes across all input datasets and writes the `norm_stats.json` used by training.
 
+For the fixed-target cotrain experiments below, compute and use target-only normalization stats so both cotrain runs normalize with the same LIBERO-10 target distribution:
+
+```bash
+export TARGET_NORM_STATS_PATH=$STORAGE_ROOT/libero/norm_stats/libero10_target_only/norm_stats.json
+
+python scripts/compute_norm_stats_libero.py \
+  --config-name libero_cotrain_l450_test_50_50 \
+  --repo-ids libero10_lerobot \
+  --roots $TARGET_ROOT \
+  --action-key action \
+  --num-episodes 30 \
+  --seed 42 \
+  --batch-size 256 \
+  --num-workers 8 \
+  --output-dir $(dirname $TARGET_NORM_STATS_PATH)
+```
+
+Training commands can override the config default with `--norm-stats-path $TARGET_NORM_STATS_PATH`.
+
 ## Stage 1: Datamodel Selection
 
 pi0 DataMIL uses the same data-weight metagradient objective as the Octo implementation: selected source episodes train with weight 1, candidate source episodes enter the inner trajectory with weight 0, and `datamodels.npy` stores `d(target_validation_loss) / d(candidate_episode_weight)`.
@@ -240,6 +259,7 @@ python scripts/train_pi0_selected_libero.py \
   --repo-ids libero90_lerobot libero10_lerobot \
   --roots $SOURCE_ROOT $TARGET_ROOT \
   --action-key action \
+  --norm-stats-path $TARGET_NORM_STATS_PATH \
   --selected-indices-path tmp/libero_cotrain_splits_seed42/source_all_episodes.json \
   --target-include-index-path tmp/libero_cotrain_splits_seed42/target_5_episodes_per_task_seed42.json \
   --dataset-weights 0.5 0.5 \
@@ -261,6 +281,7 @@ python scripts/train_pi0_selected_libero.py \
   --repo-ids libero90_lerobot libero10_lerobot \
   --roots $SOURCE_ROOT $TARGET_ROOT \
   --action-key action \
+  --norm-stats-path $TARGET_NORM_STATS_PATH \
   --selected-indices-path checkpoints/libero_cotrain_l450_test_50_50/datamil_pi0_libero/datamil/selected_indices_topk0.1.npy \
   --target-include-index-path tmp/libero_cotrain_splits_seed42/target_5_episodes_per_task_seed42.json \
   --dataset-weights 0.5 0.5 \

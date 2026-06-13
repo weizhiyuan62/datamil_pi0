@@ -33,6 +33,7 @@ class CommonOverrides:
     num_workers: int | None = None
     pytorch_weight_path: str | None = None
     pytorch_training_precision: str | None = None
+    norm_stats_path: str | None = None
     seed: int | None = None
     device: str = "cuda"
 
@@ -118,6 +119,7 @@ def make_config(overrides: CommonOverrides) -> TrainConfig:
         num_workers=overrides.num_workers,
         seed=overrides.seed,
         pytorch_weight_path=overrides.pytorch_weight_path,
+        norm_stats_path_override=overrides.norm_stats_path,
     )
     if overrides.pytorch_training_precision is not None:
         config = dataclasses.replace(

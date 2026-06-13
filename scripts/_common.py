@@ -27,6 +27,11 @@ def add_common_args(parser: argparse.ArgumentParser, *, default_exp_name: str, r
     parser.add_argument("--num-workers", type=int, default=None)
     parser.add_argument("--pytorch-weight-path", required=require_pytorch_weight)
     parser.add_argument("--pytorch-training-precision", choices=["bfloat16", "float32"], default=None)
+    parser.add_argument(
+        "--norm-stats-path",
+        default=None,
+        help="Optional norm_stats.json override. Use this to train with target-dataset normalization.",
+    )
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--device", default="cuda")
 
@@ -47,6 +52,7 @@ def common_overrides(args: argparse.Namespace) -> CommonOverrides:
         num_workers=args.num_workers,
         pytorch_weight_path=args.pytorch_weight_path,
         pytorch_training_precision=args.pytorch_training_precision,
+        norm_stats_path=args.norm_stats_path,
         seed=args.seed,
         device=args.device,
     )

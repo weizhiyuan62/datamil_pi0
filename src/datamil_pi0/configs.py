@@ -55,6 +55,7 @@ class TrainConfig:
     lr_schedule: LRScheduleConfig = field(default_factory=LRScheduleConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     pytorch_weight_path: str | None = None
+    norm_stats_path_override: str | None = None
 
     @property
     def checkpoint_dir(self) -> Path:
@@ -66,6 +67,8 @@ class TrainConfig:
 
     @property
     def norm_stats_path(self) -> Path:
+        if self.norm_stats_path_override is not None:
+            return Path(self.norm_stats_path_override).expanduser().resolve()
         return self.assets_dir / self.data.asset_id / "norm_stats.json"
 
 
