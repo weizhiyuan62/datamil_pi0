@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import re
 import sys
 from typing import Any
 
@@ -24,6 +25,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-chunks", type=int, default=128)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--task-indices", nargs="*", type=int, default=None, help="Only sample chunks from these task indices.")
+    parser.add_argument("--task-name-contains", default=None, help="Only sample chunks whose prompt contains this substring.")
+    parser.add_argument("--task-regex", default=None, help="Only sample chunks whose prompt matches this regex.")
     parser.add_argument("--noise-seed", type=int, default=None, help="Base seed for deterministic per-frame generation noise.")
     parser.add_argument(
         "--stochastic-noise",
@@ -77,17 +81,38 @@ def find_norm_stats_path(checkpoint_dir: Path, explicit_path: str | None) -> Pat
     raise ValueError(f"Multiple norm_stats.json files found; pass --norm-stats-path explicitly: {candidates}")
 
 
-def select_valid_frame_indices(dataset, *, action_horizon: int, num_chunks: int, seed: int) -> list[int]:
+def select_valid_frame_indices(
+    dataset,
+    *,
+    action_horizon: int,
+    num_chunks: int,
+    seed: int,
+    task_indices: list[int] | None = None,
+    task_name_contains: str | None = None,
+    task_regex: str | None = None,
+) -> list[int]:
     from datamil_pi0.dataset.loaders import build_episode_index
 
     valid_frames: list[int] = []
     horizon = max(1, int(action_horizon))
+    regex = re.compile(task_regex) if task_regex else None
     for frames in build_episode_index(dataset).values():
         num_valid_starts = len(frames) - horizon + 1
         if num_valid_starts > 0:
+            if not episode_matches_task(
+                dataset,
+                frames[0],
+                task_indices=task_indices,
+                task_name_contains=task_name_contains,
+                task_regex=regex,
+            ):
+                continue
             valid_frames.extend(frames[:num_valid_starts])
     if not valid_frames:
-        raise ValueError("No valid action chunks found for the configured horizon.")
+        raise ValueError(
+            "No valid action chunks found for the configured horizon/task filter. "
+            f"task_indices={task_indices}, task_name_contains={task_name_contains!r}, task_regex={task_regex!r}"
+        )
     rng = np.random.default_rng(seed)
     valid_array = np.asarray(valid_frames, dtype=np.int64)
     if num_chunks <= len(valid_array):
@@ -96,6 +121,41 @@ def select_valid_frame_indices(dataset, *, action_horizon: int, num_chunks: int,
     order = rng.permutation(len(valid_array))
     extra = rng.choice(valid_array, size=num_chunks - len(valid_array), replace=True)
     return np.concatenate([valid_array[order], extra]).astype(int).tolist()
+
+
+def episode_matches_task(
+    dataset,
+    frame_index: int,
+    *,
+    task_indices: list[int] | None,
+    task_name_contains: str | None,
+    task_regex,
+) -> bool:
+    if task_indices is None and task_name_contains is None and task_regex is None:
+        return True
+    sample = dataset[int(frame_index)]
+    task_index = int(np.asarray(sample.get("task_index", -1)).reshape(-1)[0])
+    prompt = str(sample.get("prompt", ""))
+    if task_indices is not None and task_index not in set(int(x) for x in task_indices):
+        return False
+    if task_name_contains is not None and task_name_contains.lower() not in prompt.lower():
+        return False
+    if task_regex is not None and not task_regex.search(prompt):
+        return False
+    return True
+
+
+def summarize_sampled_tasks(dataset, frame_indices: list[int]) -> list[dict[str, Any]]:
+    counts: dict[tuple[int, str], int] = {}
+    for frame_index in frame_indices:
+        sample = dataset[int(frame_index)]
+        task_index = int(np.asarray(sample.get("task_index", -1)).reshape(-1)[0])
+        prompt = str(sample.get("prompt", ""))
+        counts[(task_index, prompt)] = counts.get((task_index, prompt), 0) + 1
+    return [
+        {"task_index": task_index, "prompt": prompt, "num_chunks": count}
+        for (task_index, prompt), count in sorted(counts.items(), key=lambda item: (-item[1], item[0][0], item[0][1]))
+    ]
 
 
 class ChunkDataset:
@@ -194,7 +254,11 @@ def main() -> None:
         action_horizon=config.action_horizon,
         num_chunks=args.num_chunks,
         seed=args.seed,
+        task_indices=args.task_indices,
+        task_name_contains=args.task_name_contains,
+        task_regex=args.task_regex,
     )
+    sampled_task_summary = summarize_sampled_tasks(raw_dataset, frame_indices)
     transform = make_libero_transforms(
         config,
         norm_stats,
@@ -281,6 +345,12 @@ def main() -> None:
         "noise_mode": "stochastic" if args.stochastic_noise else "deterministic_per_frame",
         "noise_seed": None if args.stochastic_noise else noise_seed,
         "sampled_frame_indices": frame_indices,
+        "task_filter": {
+            "task_indices": args.task_indices,
+            "task_name_contains": args.task_name_contains,
+            "task_regex": args.task_regex,
+        },
+        "sampled_task_summary": sampled_task_summary,
         "generation_mse": {
             "mean": float(sum_step_dim_mse.sum() / max(1, total_chunks * config.action_horizon * args.real_action_dim)),
             "best_horizon_index": best_horizon_index,
