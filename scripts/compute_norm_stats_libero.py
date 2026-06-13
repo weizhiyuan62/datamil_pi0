@@ -331,6 +331,7 @@ def main() -> None:
             "num_episodes": sample_count,
             "num_candidate_episodes": len(candidate_episodes),
             "seed": args.seed,
+            "action_horizon": args.action_horizon,
             "selected_episodes": selected_episode_summary,
         },
         "norm_stats": {key: value.get_statistics() for key, value in stats.items()},

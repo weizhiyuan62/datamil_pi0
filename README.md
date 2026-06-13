@@ -95,6 +95,7 @@ python scripts/compute_norm_stats_libero.py \
   --repo-ids libero90_lerobot libero10_lerobot \
   --roots $SOURCE_ROOT $TARGET_ROOT \
   --action-key action \
+  --action-horizon 15 \
   --num-episodes 30 \
   --seed 42 \
   --batch-size 256 \
@@ -113,6 +114,7 @@ python scripts/compute_norm_stats_libero.py \
   --repo-ids libero10_lerobot \
   --roots $TARGET_ROOT \
   --action-key action \
+  --action-horizon 15 \
   --num-episodes 30 \
   --seed 42 \
   --batch-size 256 \
@@ -299,10 +301,13 @@ python scripts/train_pi0_selected_libero.py \
 Output:
 
 ```text
-checkpoints/libero_cotrain_l450_test_50_50/<exp_name>/<step>/
-  model.safetensors
-  optimizer.pt
-  metadata.json
+checkpoints/libero_cotrain_l450_test_50_50/<exp_name>/storage/<YYYYMMDD_HHMMSS>/
+  selected_training_info.json
+  train_metrics.jsonl
+  <step>/
+    model.safetensors
+    optimizer.pt
+    metadata.json
 ```
 
 Each run also writes `selected_training_info.json`, including the exact source episode list, target episode list, task counts, dataset weights, and sampling description.
@@ -310,7 +315,7 @@ Each run also writes `selected_training_info.json`, including the exact source e
 Selected pi0 training always writes local scalar logs to:
 
 ```text
-checkpoints/libero_cotrain_l450_test_50_50/<exp_name>/train_metrics.jsonl
+checkpoints/libero_cotrain_l450_test_50_50/<exp_name>/storage/<YYYYMMDD_HHMMSS>/train_metrics.jsonl
 ```
 
 Each log row includes `train/loss`, `train/lr`, `train/grad_norm`, `train/step_time_sec`, and `train/global_step`. Passing `--swanlab-project` enables SwanLab logging for the same metrics; omit it to run without SwanLab.

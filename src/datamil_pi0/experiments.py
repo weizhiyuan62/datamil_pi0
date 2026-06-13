@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import dataclasses
+from datetime import datetime
 import json
 from pathlib import Path
 import shutil
@@ -133,6 +134,13 @@ def datamodel_iter_dir(config: TrainConfig, *, job_id: int, output_dir: str | No
     if output_dir is not None:
         return Path(output_dir).expanduser().resolve() / f"iter_{job_id}"
     return config.checkpoint_dir / "datamil" / f"iter_{job_id}"
+
+
+def selected_training_output_dir(config: TrainConfig, output_dir: str | None = None) -> Path:
+    if output_dir is not None:
+        return Path(output_dir).expanduser().resolve()
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return config.checkpoint_dir / "storage" / run_id
 
 
 def default_include_index_path(common: CommonOverrides, *, datamodel_exp_name: str, job_id: int, output_dir: str | None = None) -> Path:
@@ -409,6 +417,7 @@ def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
                 "selected_policy_train_data": "selected_source_plus_target_mixed",
                 "datamodel_trainable_scope": datamodel_trainable_info,
                 "config_name": args.common.config_name,
+                "action_horizon": config.model.action_horizon,
                 "selection_unit": "episode",
                 "num_frames": len(selection_dataset),
                 "num_source_episodes_total": len(all_episode_ids),
@@ -524,7 +533,7 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
 
     config = make_config(args.common)
     device = torch_device(args.common.device)
-    output_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir is not None else config.checkpoint_dir
+    output_dir = selected_training_output_dir(config, args.output_dir)
     if output_dir.exists() and args.overwrite:
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -560,6 +569,8 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
     run_info = {
         "stage": "selected_pi0_training",
         "config_name": args.common.config_name,
+        "output_dir": str(output_dir),
+        "action_horizon": config.model.action_horizon,
         "selection_unit": "episode",
         "num_source_episodes": len(episode_ids),
         "include_index_path": str(Path(args.include_index_path).expanduser().resolve()),

@@ -36,7 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repo-ids", nargs="+", required=True)
     parser.add_argument("--roots", nargs="+", required=True)
     parser.add_argument("--action-key", default="action")
-    parser.add_argument("--action-horizon", type=int, default=50)
+    parser.add_argument("--action-horizon", type=int, default=15)
     return parser.parse_args()
 
 
