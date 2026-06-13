@@ -34,11 +34,11 @@ eval = [
     "bddl==1.0.1",
     "cloudpickle==2.1.0",
     "easydict==1.9",
+    "future==0.18.2",
     "gym==0.25.2",
     "imageio[ffmpeg]>=2.36.1",
     "matplotlib>=3.8.0",
     "opencv-python==4.6.0.66",
-    "robosuite==1.4.1",
 ]
 
 [tool.hatch.metadata]

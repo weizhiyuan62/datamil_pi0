@@ -312,10 +312,28 @@ If SwanLab is not installed in the environment, either install it first or remov
 
 ## LIBERO Inference Eval
 
-The simulator eval requires the LIBERO benchmark package and robosuite stack. These are intentionally optional
-because training and chunk-level checkpoint checks do not need MuJoCo/LIBERO:
+The recommended simulator eval path isolates model inference from LIBERO simulation, following OpenPI's
+two-process style:
+
+- model / training env: loads the pi0 checkpoint and serves actions over HTTP.
+- LIBERO sim env: imports LIBERO / robosuite / MuJoCo, runs the environment, and requests actions from the server.
+
+This keeps the training stack away from LIBERO's older simulation dependencies.
+
+In the model environment, no LIBERO dependencies are needed:
 
 ```bash
+python scripts/serve_pi0_policy.py \
+  --checkpoint-dir checkpoints/libero_cotrain_l450_test_50_50/cotrain_selected450_plus_fixed_libero10_50/storage/<YYYYMMDD_HHMMSS>/5000 \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --device cuda
+```
+
+In the LIBERO simulation environment, install only the simulation-side dependencies:
+
+```bash
+# Use Python 3.11; the project metadata requires Python>=3.11.
 uv pip install -e ".[eval]"
 git clone https://github.com/Lifelong-Robot-Learning/LIBERO.git third_party/LIBERO
 uv pip install -e third_party/LIBERO
@@ -323,7 +341,11 @@ export PYTHONPATH=$PWD/third_party/LIBERO:$PYTHONPATH
 ```
 
 LIBERO's `setup.py` does not install its `requirements.txt` because `install_requires=[]`; the project's
-`.[eval]` extra installs the runtime packages needed by `scripts/eval_pi0_libero.py`, including `bddl`.
+`.[eval]` extra installs the lightweight runtime packages needed by `scripts/eval_pi0_libero_remote.py`, including
+`bddl` and `future`. It intentionally does not install `robosuite`: recent robosuite wheels may pull native
+EGL probing packages such as `egl-probe`, which can require system OpenGL/EGL development libraries on
+headless machines. If `import robosuite` fails, install robosuite in the environment following your machine's
+MuJoCo/OpenGL setup; otherwise keep the existing robosuite installation.
 
 On headless machines, set a MuJoCo backend before running eval, for example:
 
@@ -331,27 +353,42 @@ On headless machines, set a MuJoCo backend before running eval, for example:
 export MUJOCO_GL=egl
 ```
 
-Evaluate a saved selected-training checkpoint directly in LIBERO simulation:
+Then run remote LIBERO simulation eval from the LIBERO environment:
 
 ```bash
-python scripts/eval_pi0_libero.py \
-  --checkpoint-dir checkpoints/libero_cotrain_l450_test_50_50/cotrain_selected450_plus_fixed_libero10_50/storage/<YYYYMMDD_HHMMSS>/5000 \
+python scripts/eval_pi0_libero_remote.py \
+  --policy-server-url http://127.0.0.1:8000 \
   --task-suite-name libero_10 \
   --num-trials-per-task 50 \
-  --replan-steps 5 \
-  --device cuda
+  --replan-steps 5
 ```
 
 For a quick smoke test:
 
 ```bash
+python scripts/eval_pi0_libero_remote.py \
+  --policy-server-url http://127.0.0.1:8000 \
+  --task-suite-name libero_10 \
+  --task-ids 0 \
+  --num-trials-per-task 1 \
+  --no-video
+```
+
+The policy server loads `model.safetensors`, reads the checkpoint-local `assets/<asset_id>/norm_stats.json`,
+unnormalizes predicted actions, and converts the gripper action by default. The remote evaluator writes
+`data/libero/eval_results/libero_eval_<suite>_<timestamp>.json`. The default `--state-format datamil` on the
+remote evaluator and `--gripper-conversion datamil` on the policy server match this repo's official-LIBERO
+conversion path; use `openpi` / `none` only when evaluating checkpoints trained with OpenPI's original
+action/state convention.
+
+The old single-process evaluator is still available for debugging when one environment has both model and
+simulation dependencies:
+
+```bash
 python scripts/eval_pi0_libero.py \
   --checkpoint-dir checkpoints/libero_cotrain_l450_test_50_50/cotrain_selected450_plus_fixed_libero10_50/storage/<YYYYMMDD_HHMMSS>/5000 \
   --task-suite-name libero_10 \
-  --task-ids 0 \
   --num-trials-per-task 1 \
   --no-video \
   --device cuda
 ```
-
-The evaluator loads `model.safetensors`, reads the checkpoint-local `assets/<asset_id>/norm_stats.json`, unnormalizes predicted actions, and writes `libero_eval_<suite>.json` back into the checkpoint directory. The default `--state-format datamil` and `--gripper-conversion datamil` match this repo's official-LIBERO conversion path; use `openpi` / `none` only when evaluating checkpoints trained with OpenPI's original action/state convention.
