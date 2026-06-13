@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 import numpy as np
+from PIL import Image
 
 from datamil_pi0.model.config import Pi0Config
 from datamil_pi0.tokenizer import PaligemmaTokenizer
@@ -159,6 +160,16 @@ class DeltaActions:
 
 
 @dataclasses.dataclass(frozen=True)
+class ResizeImages:
+    height: int
+    width: int
+
+    def __call__(self, data: dict) -> dict:
+        data["image"] = {key: resize_with_pad(value, self.height, self.width) for key, value in data["image"].items()}
+        return data
+
+
+@dataclasses.dataclass(frozen=True)
 class TokenizePrompt:
     tokenizer: PaligemmaTokenizer
     discrete_state_input: bool = False
@@ -254,6 +265,7 @@ def make_libero_transforms(
     transforms.extend(
         [
             Normalize(norm_stats, use_quantiles=False, action_normalization_mask=action_normalization_mask),
+            ResizeImages(224, 224),
             TokenizePrompt(PaligemmaTokenizer(config.max_token_len), discrete_state_input=config.discrete_state_input),
             PadStatesAndActions(config.action_dim),
         ]
@@ -287,6 +299,36 @@ def _lookup_first(flat_item: dict[str, Any], key_or_keys):
             return flat_item[key]
     preview = ", ".join(sorted(flat_item.keys())[:20])
     raise KeyError(f"None of {keys} found in sample. Available keys include: {preview}")
+
+
+def resize_with_pad(image: np.ndarray, height: int, width: int) -> np.ndarray:
+    image = np.asarray(image)
+    if image.shape[-3:-1] == (height, width):
+        return image
+    original_shape = image.shape
+    images = image.reshape(-1, *original_shape[-3:])
+    resized = np.stack([_resize_one_with_pad(img, height, width) for img in images], axis=0)
+    return resized.reshape(*original_shape[:-3], height, width, original_shape[-1])
+
+
+def _resize_one_with_pad(image: np.ndarray, height: int, width: int) -> np.ndarray:
+    if np.issubdtype(image.dtype, np.floating):
+        image = (255 * image).astype(np.uint8)
+    pil_image = Image.fromarray(image)
+    cur_width, cur_height = pil_image.size
+    if cur_width == width and cur_height == height:
+        return np.asarray(pil_image)
+
+    ratio = max(cur_width / width, cur_height / height)
+    resized_height = int(cur_height / ratio)
+    resized_width = int(cur_width / ratio)
+    resized_image = pil_image.resize((resized_width, resized_height), resample=Image.BILINEAR)
+
+    zero_image = Image.new(resized_image.mode, (width, height), 0)
+    pad_height = max(0, int((height - resized_height) / 2))
+    pad_width = max(0, int((width - resized_width) / 2))
+    zero_image.paste(resized_image, (pad_width, pad_height))
+    return np.asarray(zero_image)
 
 
 def pad_to_dim(x: np.ndarray, target_dim: int, axis: int = -1, value: float = 0.0) -> np.ndarray:

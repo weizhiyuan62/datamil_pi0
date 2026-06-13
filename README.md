@@ -299,7 +299,7 @@ Selected pi0 training always writes local scalar logs to:
 checkpoints/libero_cotrain_l450_test_50_50/<exp_name>/storage/<YYYYMMDD_HHMMSS>/train_metrics.jsonl
 ```
 
-Each log row includes `train/loss`, `train/lr`, `train/grad_norm`, `train/step_time_sec`, and `train/global_step`. `train/loss` follows the OpenPI pi0 objective and averages the full padded 32-dimensional action loss. Diagnostic metrics such as `train/loss_real7`, `train/loss_continuous6`, `train/loss_gripper`, `train/loss_pad`, and `train/loss_dim/dim_XX` are also logged for loss-scale debugging. Passing `--swanlab-project` enables SwanLab logging for the same metrics; omit it to run without SwanLab.
+Each log row includes `train/loss`, `train/lr`, `train/grad_norm`, `train/step_time_sec`, and `train/global_step`. `train/loss` follows the OpenPI pi0 objective and averages the full padded 32-dimensional action loss. Diagnostic metrics such as `train/loss_real7`, `train/loss_continuous6`, `train/loss_gripper`, `train/loss_pad`, and `train/loss_dim/dim_XX` are also logged for loss-scale debugging. Passing `--swanlab-project` enables SwanLab logging for the same metrics; omit it to run without SwanLab. SwanLab run names automatically get a `YYMMDD_HHMMSS` suffix, so repeated commands do not overwrite or merge under the same display name.
 
 If SwanLab is not installed in the environment, either install it first or remove the two `--swanlab-*` arguments.
 

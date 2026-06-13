@@ -144,6 +144,11 @@ def selected_training_output_dir(config: TrainConfig, output_dir: str | None = N
     return config.checkpoint_dir / "storage" / run_id
 
 
+def timestamped_run_name(base_name: str | None, fallback_name: str, timestamp: str) -> str:
+    base = base_name or fallback_name
+    return f"{base}_{timestamp}"
+
+
 def default_include_index_path(common: CommonOverrides, *, datamodel_exp_name: str, job_id: int, output_dir: str | None = None) -> Path:
     config_common = dataclasses.replace(common, exp_name=datamodel_exp_name)
     config = make_config(config_common)
@@ -225,6 +230,18 @@ def copy_norm_stats_for_run(config: TrainConfig, output_dir: Path) -> str:
 
 def json_safe(value: Any) -> Any:
     return json.loads(json.dumps(value, default=str))
+
+
+def average_numeric_metrics(metrics_window: Sequence[dict[str, Any]]) -> dict[str, float]:
+    if not metrics_window:
+        return {}
+    keys = sorted({key for metrics in metrics_window for key in metrics})
+    averaged: dict[str, float] = {}
+    for key in keys:
+        values = [metrics[key] for metrics in metrics_window if isinstance(metrics.get(key), (int, float))]
+        if values:
+            averaged[key] = float(np.mean(values))
+    return averaged
 
 
 class TrainingMetricLogger:
@@ -545,6 +562,8 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
     config = make_config(args.common)
     device = torch_device(args.common.device)
     output_dir = selected_training_output_dir(config, args.output_dir)
+    run_timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
+    swanlab_run_name = timestamped_run_name(args.swanlab_run_name, config.exp_name, run_timestamp)
     if output_dir.exists() and args.overwrite:
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -625,7 +644,8 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
         "norm_stats_path": str(norm_stats_path),
         "norm_stats_compute_info": norm_compute_info,
         "swanlab_project": args.swanlab_project,
-        "swanlab_run_name": args.swanlab_run_name,
+        "swanlab_run_name": swanlab_run_name,
+        "run_timestamp": run_timestamp,
     }
     with open(output_dir / "selected_training_info.json", "w") as f:
         json.dump(json_safe(run_info), f, indent=2)
@@ -634,7 +654,7 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
     metric_logger = TrainingMetricLogger(
         output_dir,
         swanlab_project=args.swanlab_project,
-        swanlab_run_name=args.swanlab_run_name,
+        swanlab_run_name=swanlab_run_name,
         config=config,
         run_info=run_info,
     )
@@ -644,6 +664,7 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
     save_interval = config.save_interval if args.save_interval is None else args.save_interval
     iterator = iter(loader)
     start_time = time.time()
+    metrics_window: list[dict[str, Any]] = []
     model.train()
     pbar = tqdm.tqdm(range(train_steps), desc="selected pi0 training")
     try:
@@ -662,17 +683,22 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
             global_step = step + 1
             metrics["train/global_step"] = global_step
             metrics["train/step_time_sec"] = time.time() - step_start_time
+            metrics_window.append(metrics)
 
             if step % args.log_interval == 0 or global_step == train_steps:
                 elapsed = time.time() - start_time
-                metrics["train/log_interval_sec"] = elapsed
-                metric_logger.log(metrics, step=global_step)
+                log_metrics = average_numeric_metrics(metrics_window)
+                log_metrics["train/loss_instant"] = metrics["train/loss"]
+                log_metrics["train/global_step"] = global_step
+                log_metrics["train/log_interval_sec"] = elapsed
+                metric_logger.log(log_metrics, step=global_step)
                 pbar.set_postfix(
-                    loss=f"{metrics['train/loss']:.4f}",
-                    lr=f"{metrics['train/lr']:.2e}",
-                    grad=f"{metrics['train/grad_norm']:.2f}",
+                    loss=f"{log_metrics['train/loss']:.4f}",
+                    lr=f"{log_metrics['train/lr']:.2e}",
+                    grad=f"{log_metrics['train/grad_norm']:.2f}",
                     time=f"{elapsed:.1f}s",
                 )
+                metrics_window.clear()
                 start_time = time.time()
 
             if save_interval > 0 and (global_step % save_interval == 0 or global_step == train_steps):
