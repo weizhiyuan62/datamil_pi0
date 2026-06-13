@@ -272,7 +272,7 @@ python scripts/train_pi0_selected_libero.py \
   --save-interval 5000 \
   --swanlab-project datamil-pi0 \
   --swanlab-run-name cotrain_full4500_fixed50 \
-  --output-dir checkpoints/libero_cotrain_l450_test_50_50/cotrain_full_libero90_plus_fixed_libero10_50_1
+  --overwrite
 ```
 
 Experiment B trains on DataMIL-selected LIBERO-90 episodes plus the same fixed 50-episode LIBERO-10 target split (`450 + 50 = 500` episodes when `--topk 0.1` is used on 4500 source episodes):
@@ -295,7 +295,8 @@ python scripts/train_pi0_selected_libero.py \
   --train-steps 10000 \
   --save-interval 5000 \
   --swanlab-project datamil-pi0 \
-  --swanlab-run-name cotrain_selected_450fixed50
+  --swanlab-run-name cotrain_selected_450fixed50 \
+  --overwrite
 ```
 
 Output:
