@@ -28,8 +28,8 @@ def parse_args() -> argparse.Namespace:
         choices=["libero_spatial", "libero_object", "libero_goal", "libero_10", "libero_90"],
     )
     parser.add_argument("--task-ids", nargs="*", type=int, default=None, help="Subset of task ids to evaluate.")
-    parser.add_argument("--num-trials-per-task", type=int, default=50)
-    parser.add_argument("--num-steps-wait", type=int, default=10)
+    parser.add_argument("--num-trials-per-task", type=int, default=10)
+    parser.add_argument("--num-steps-wait", type=int, default=15)
     parser.add_argument("--replan-steps", type=int, default=5)
     parser.add_argument("--resize-size", type=int, default=224)
     parser.add_argument("--video-out-path", default="data/libero/videos")
@@ -286,7 +286,7 @@ def max_steps_for_suite(task_suite_name: str) -> int:
     if task_suite_name == "libero_goal":
         return 300
     if task_suite_name == "libero_10":
-        return 520
+        return 1200
     if task_suite_name == "libero_90":
         return 400
     raise ValueError(f"Unknown task suite: {task_suite_name}")

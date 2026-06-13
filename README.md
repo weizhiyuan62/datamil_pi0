@@ -330,6 +330,14 @@ python scripts/serve_pi0_policy.py \
   --host 0.0.0.0 \
   --port 8000 \
   --device cuda
+
+# cotrain with full 4500 data
+export CUDA_VISIBLE_DEVICES=1
+python scripts/serve_pi0_policy.py \
+  --checkpoint-dir checkpoints/libero_cotrain_l450_test_50_50/cotrain_full_libero90_plus_fixed_libero10_50/storage/20260613_112729/10000 \
+  --host 0.0.0.0 \
+  --port 8001 \
+  --device cuda
 ```
 
 In the LIBERO simulation environment, install only the simulation-side dependencies:
@@ -361,24 +369,25 @@ export MUJOCO_GL=egl
 Then run remote LIBERO simulation eval from the LIBERO environment:
 
 ```bash
-CUDA_VISIBLE_DEVICES=0
+# test: cotrain with selected 450 data
+export CUDA_VISIBLE_DEVICES=0
 python scripts/eval_pi0_libero_remote.py \
   --policy-server-url http://127.0.0.1:8000 \
   --task-suite-name libero_10 \
-  --num-trials-per-task 30 \
-  --replan-steps 5
-```
+  --num-trials-per-task 10 \
+  --replan-steps 4
 
-For a quick smoke test:
-
-```bash
+# test: cotrain with full 4500 data
+export CUDA_VISIBLE_DEVICES=1
 python scripts/eval_pi0_libero_remote.py \
-  --policy-server-url http://127.0.0.1:8000 \
+  --policy-server-url http://127.0.0.1:8001 \
   --task-suite-name libero_10 \
-  --task-ids 0 \
-  --num-trials-per-task 1 \
-  --no-video
+  --num-trials-per-task 10 \
+  --replan-steps 4 \
+  --video-out-path data/libero/videos-1 \
+  --output-path data/libero/eval_results/libero_eval_libero10_cotrainfulldata.json
 ```
+
 
 The policy server loads `model.safetensors`, reads the checkpoint-local `assets/<asset_id>/norm_stats.json`,
 unnormalizes predicted actions, and converts the gripper action by default. The remote evaluator writes
