@@ -38,6 +38,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--http-timeout-sec", type=float, default=60.0)
     parser.add_argument(
+        "--log-every-steps",
+        type=int,
+        default=50,
+        help="Print sim-side episode progress every N executed action steps; set <=0 to disable step logs.",
+    )
+    parser.add_argument(
         "--state-format",
         choices=["datamil", "openpi"],
         default="datamil",
@@ -94,6 +100,9 @@ def eval_libero(args: argparse.Namespace) -> None:
     import tqdm
     from libero.libero import benchmark
 
+    def sim_log(message: str) -> None:
+        tqdm.tqdm.write(message)
+
     patch_torch_load_for_libero_init_states(torch)
     np.random.seed(args.seed)
 
@@ -121,6 +130,7 @@ def eval_libero(args: argparse.Namespace) -> None:
         task_episodes = 0
         task_successes = 0
         trial_count = min(args.num_trials_per_task, len(initial_states))
+        episode_logs = []
         try:
             for episode_idx in tqdm.tqdm(range(trial_count), desc=f"task {task_id}", leave=False):
                 env.reset()
@@ -128,7 +138,14 @@ def eval_libero(args: argparse.Namespace) -> None:
                 obs = env.set_init_state(initial_states[episode_idx])
                 replay_images = []
                 done = False
+                error_message = None
+                action_steps = 0
+                policy_queries = 0
                 t = 0
+                sim_log(
+                    f"[sim] start task={task_id} episode={episode_idx + 1}/{trial_count} "
+                    f"max_action_steps={max_steps} desc={task_description}"
+                )
                 while t < max_steps + args.num_steps_wait:
                     try:
                         if t < args.num_steps_wait:
@@ -150,6 +167,7 @@ def eval_libero(args: argparse.Namespace) -> None:
                                 "prompt": str(task_description),
                             }
                             action_chunk = policy.infer(element)["actions"]
+                            policy_queries += 1
                             if len(action_chunk) < args.replan_steps:
                                 raise ValueError(
                                     f"Policy returned {len(action_chunk)} actions, fewer than replan_steps={args.replan_steps}."
@@ -158,17 +176,42 @@ def eval_libero(args: argparse.Namespace) -> None:
 
                         action = action_plan.popleft()
                         obs, _, done, _ = env.step(action.tolist())
+                        action_steps += 1
+                        t += 1
+                        if args.log_every_steps > 0 and action_steps % args.log_every_steps == 0:
+                            sim_log(
+                                f"[sim] progress task={task_id} episode={episode_idx + 1}/{trial_count} "
+                                f"action_steps={action_steps}/{max_steps} total_env_steps={t} "
+                                f"policy_queries={policy_queries} queue={len(action_plan)}"
+                            )
                         if done:
                             task_successes += 1
                             total_successes += 1
                             break
-                        t += 1
-                    except Exception:
+                    except Exception as exc:
+                        error_message = repr(exc)
                         logging.exception("Evaluation exception on task_id=%s episode=%s", task_id, episode_idx)
                         break
 
                 task_episodes += 1
                 total_episodes += 1
+                status = "success" if done else "error" if error_message is not None else "failure"
+                sim_log(
+                    f"[sim] end task={task_id} episode={episode_idx + 1}/{trial_count} "
+                    f"status={status} action_steps={action_steps} total_env_steps={t} "
+                    f"policy_queries={policy_queries} success_rate_task={task_successes}/{task_episodes}"
+                )
+                episode_logs.append(
+                    {
+                        "episode_index": int(episode_idx),
+                        "status": status,
+                        "success": bool(done),
+                        "action_steps": int(action_steps),
+                        "total_env_steps": int(t),
+                        "policy_queries": int(policy_queries),
+                        "error": error_message,
+                    }
+                )
                 if not args.no_video and replay_images:
                     import imageio
 
@@ -191,6 +234,7 @@ def eval_libero(args: argparse.Namespace) -> None:
                 "episodes": int(task_episodes),
                 "successes": int(task_successes),
                 "success_rate": task_success_rate,
+                "episode_logs": episode_logs,
             }
         )
         logging.info("Task %s success rate: %.3f", task_id, task_success_rate)
