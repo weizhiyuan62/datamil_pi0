@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import shutil
 import time
+from typing import Any
 from typing import Sequence
 
 import numpy as np
@@ -69,6 +70,8 @@ class SelectedTrainingArgs:
     save_interval: int | None = None
     output_dir: str | None = None
     log_interval: int = 50
+    swanlab_project: str | None = None
+    swanlab_run_name: str | None = None
     overwrite: bool = False
 
 
@@ -207,6 +210,99 @@ def copy_norm_stats_for_run(config: TrainConfig, output_dir: Path) -> str:
     norm_stats = load_norm_stats(norm_stats_path)
     save_norm_stats(output_dir / "assets" / config.data.asset_id, norm_stats)
     return str(norm_stats_path)
+
+
+def json_safe(value: Any) -> Any:
+    return json.loads(json.dumps(value, default=str))
+
+
+class TrainingMetricLogger:
+    def __init__(
+        self,
+        output_dir: Path,
+        *,
+        swanlab_project: str | None,
+        swanlab_run_name: str | None,
+        config: TrainConfig,
+        run_info: dict[str, Any],
+    ):
+        self._metrics_path = output_dir / "train_metrics.jsonl"
+        self._metrics_file = open(self._metrics_path, "a")
+        self._swanlab = None
+        if swanlab_project is not None:
+            try:
+                import swanlab
+            except ImportError as exc:
+                raise ImportError(
+                    "SwanLab logging was requested but `swanlab` is not installed. "
+                    "Install it first, or omit --swanlab-project."
+                ) from exc
+
+            self._swanlab = swanlab
+            swanlab_config = json_safe({"train_config": dataclasses.asdict(config), "run_info": run_info})
+            try:
+                self._swanlab.init(
+                    project=swanlab_project,
+                    experiment_name=swanlab_run_name or config.exp_name,
+                    config=swanlab_config,
+                )
+            except TypeError:
+                self._swanlab.init(project=swanlab_project, config=swanlab_config)
+
+    @property
+    def metrics_path(self) -> Path:
+        return self._metrics_path
+
+    def log(self, metrics: dict[str, Any], *, step: int) -> None:
+        payload = {"step": int(step), **json_safe(metrics)}
+        self._metrics_file.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        self._metrics_file.flush()
+        if self._swanlab is not None:
+            try:
+                self._swanlab.log(payload, step=int(step))
+            except TypeError:
+                self._swanlab.log(payload)
+
+    def close(self) -> None:
+        if self._swanlab is not None:
+            finish = getattr(self._swanlab, "finish", None)
+            if finish is not None:
+                finish()
+        self._metrics_file.close()
+
+
+def selected_train_step(
+    *,
+    model,
+    optimizer,
+    observation,
+    actions,
+    device,
+    lr: float,
+    config: TrainConfig,
+) -> dict[str, float]:
+    import torch
+
+    from datamil_pi0.modeling import per_sample_loss
+    from datamil_pi0.utils import tree_to_device
+
+    observation = tree_to_device(observation, device)
+    actions = actions.to(device=device, dtype=torch.float32)
+
+    for group in optimizer.param_groups:
+        group["lr"] = lr
+
+    loss = per_sample_loss(model, observation, actions).mean()
+    loss.backward()
+    grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=config.optimizer.clip_gradient_norm)
+    optimizer.step()
+    optimizer.zero_grad(set_to_none=True)
+
+    return {
+        "train/loss": float(loss.detach().cpu()),
+        "train/lr": float(lr),
+        "train/grad_norm": float(grad_norm.detach().cpu() if hasattr(grad_norm, "detach") else grad_norm),
+    }
 
 
 def run_datamodel_selection(args: DatamodelSelectionArgs) -> Path:
@@ -420,11 +516,9 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
     from datamil_pi0.dataset.loaders import create_raw_lerobot_dataset
     from datamil_pi0.modeling import make_lr_schedule
     from datamil_pi0.modeling import make_pi0_pytorch_model
-    from datamil_pi0.modeling import per_sample_loss
     from datamil_pi0.modeling import save_pi0_checkpoint
     from datamil_pi0.selection import load_include_indices
     from datamil_pi0.transforms import load_norm_stats
-    from datamil_pi0.utils import tree_to_device
 
     config = make_config(args.common)
     device = torch_device(args.common.device)
@@ -461,26 +555,33 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
         seed=config.seed,
         target_episode_indices=target_indices,
     )
+    run_info = {
+        "stage": "selected_pi0_training",
+        "config_name": args.common.config_name,
+        "selection_unit": "episode",
+        "num_source_episodes": len(episode_ids),
+        "include_index_path": str(Path(args.include_index_path).expanduser().resolve()),
+        "target_include_index_path": (
+            None if args.target_include_index_path is None else str(Path(args.target_include_index_path).expanduser().resolve())
+        ),
+        "num_selected": len(selected_indices),
+        "cotrain_sampling": cotrain_info,
+        "norm_stats_path": norm_stats_path,
+        "swanlab_project": args.swanlab_project,
+        "swanlab_run_name": args.swanlab_run_name,
+    }
     with open(output_dir / "selected_training_info.json", "w") as f:
-        json.dump(
-            {
-                "stage": "selected_pi0_training",
-                "config_name": args.common.config_name,
-                "selection_unit": "episode",
-                "num_source_episodes": len(episode_ids),
-                "include_index_path": str(Path(args.include_index_path).expanduser().resolve()),
-                "target_include_index_path": (
-                    None if args.target_include_index_path is None else str(Path(args.target_include_index_path).expanduser().resolve())
-                ),
-                "num_selected": len(selected_indices),
-                "cotrain_sampling": cotrain_info,
-                "norm_stats_path": norm_stats_path,
-            },
-            f,
-            indent=2,
-        )
+        json.dump(run_info, f, indent=2)
 
     norm_stats = load_norm_stats(config.norm_stats_path)
+    metric_logger = TrainingMetricLogger(
+        output_dir,
+        swanlab_project=args.swanlab_project,
+        swanlab_run_name=args.swanlab_run_name,
+        config=config,
+        run_info=run_info,
+    )
+    print(f"Training metrics will be written to {metric_logger.metrics_path}")
 
     train_steps = config.num_train_steps if args.train_steps is None else args.train_steps
     save_interval = config.save_interval if args.save_interval is None else args.save_interval
@@ -488,27 +589,38 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
     start_time = time.time()
     model.train()
     pbar = tqdm.tqdm(range(train_steps), desc="selected pi0 training")
-    for step in pbar:
-        observation, actions = next(iterator)
-        observation = tree_to_device(observation, device)
-        actions = actions.to(device=device, dtype=torch.float32)
+    try:
+        for step in pbar:
+            step_start_time = time.time()
+            observation, actions = next(iterator)
+            metrics = selected_train_step(
+                model=model,
+                optimizer=optimizer,
+                observation=observation,
+                actions=actions,
+                device=device,
+                lr=lr_schedule(step),
+                config=config,
+            )
+            global_step = step + 1
+            metrics["train/global_step"] = global_step
+            metrics["train/step_time_sec"] = time.time() - step_start_time
 
-        for group in optimizer.param_groups:
-            group["lr"] = lr_schedule(step)
+            if step % args.log_interval == 0 or global_step == train_steps:
+                elapsed = time.time() - start_time
+                metrics["train/log_interval_sec"] = elapsed
+                metric_logger.log(metrics, step=global_step)
+                pbar.set_postfix(
+                    loss=f"{metrics['train/loss']:.4f}",
+                    lr=f"{metrics['train/lr']:.2e}",
+                    grad=f"{metrics['train/grad_norm']:.2f}",
+                    time=f"{elapsed:.1f}s",
+                )
+                start_time = time.time()
 
-        loss = per_sample_loss(model, observation, actions).mean()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=config.optimizer.clip_gradient_norm)
-        optimizer.step()
-        optimizer.zero_grad(set_to_none=True)
-
-        if step % args.log_interval == 0:
-            elapsed = time.time() - start_time
-            pbar.set_postfix(loss=f"{loss.item():.4f}", lr=f"{optimizer.param_groups[0]['lr']:.2e}", time=f"{elapsed:.1f}s")
-            start_time = time.time()
-
-        global_step = step + 1
-        if save_interval > 0 and (global_step % save_interval == 0 or global_step == train_steps):
-            save_pi0_checkpoint(model, optimizer, config, output_dir, global_step, norm_stats=norm_stats)
+            if save_interval > 0 and (global_step % save_interval == 0 or global_step == train_steps):
+                save_pi0_checkpoint(model, optimizer, config, output_dir, global_step, norm_stats=norm_stats)
+    finally:
+        metric_logger.close()
     print(f"Saved selected pi0 checkpoints to {output_dir}")
     return output_dir

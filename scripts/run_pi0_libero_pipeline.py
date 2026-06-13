@@ -55,6 +55,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--train-steps", type=int, default=None)
     parser.add_argument("--save-interval", type=int, default=None)
     parser.add_argument("--log-interval", type=int, default=50)
+    parser.add_argument("--swanlab-project", default=None, help="Enable SwanLab logging for selected pi0 training.")
+    parser.add_argument("--swanlab-run-name", default=None, help="Optional SwanLab experiment/run name.")
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args()
 
@@ -106,6 +108,8 @@ def main() -> None:
             save_interval=args.save_interval,
             output_dir=args.selected_output_dir,
             log_interval=args.log_interval,
+            swanlab_project=args.swanlab_project,
+            swanlab_run_name=args.swanlab_run_name,
             overwrite=args.overwrite,
         )
     )

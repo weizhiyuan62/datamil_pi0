@@ -246,7 +246,9 @@ python scripts/train_pi0_selected_libero.py \
   --batch-size 32 \
   --num-workers 8 \
   --train-steps 10000 \
-  --save-interval 5000
+  --save-interval 5000 \
+  --swanlab-project datamil-pi0 \
+  --swanlab-run-name cotrain_full_libero90_plus_fixed_libero10_50
 ```
 
 Experiment B trains on DataMIL-selected LIBERO-90 episodes plus the same fixed 50-episode LIBERO-10 target split (`450 + 50 = 500` episodes when `--topk 0.1` is used on 4500 source episodes):
@@ -265,7 +267,9 @@ python scripts/train_pi0_selected_libero.py \
   --batch-size 32 \
   --num-workers 8 \
   --train-steps 10000 \
-  --save-interval 5000
+  --save-interval 5000 \
+  --swanlab-project datamil-pi0 \
+  --swanlab-run-name cotrain_selected450_plus_fixed_libero10_50
 ```
 
 Output:
@@ -278,6 +282,16 @@ checkpoints/libero_cotrain_l450_test_50_50/<exp_name>/<step>/
 ```
 
 Each run also writes `selected_training_info.json`, including the exact source episode list, target episode list, task counts, dataset weights, and sampling description.
+
+Selected pi0 training always writes local scalar logs to:
+
+```text
+checkpoints/libero_cotrain_l450_test_50_50/<exp_name>/train_metrics.jsonl
+```
+
+Each log row includes `train/loss`, `train/lr`, `train/grad_norm`, `train/step_time_sec`, and `train/global_step`. Passing `--swanlab-project` enables SwanLab logging for the same metrics; omit it to run without SwanLab.
+
+If SwanLab is not installed in the environment, either install it first or remove the two `--swanlab-*` arguments.
 
 ## Notes
 
