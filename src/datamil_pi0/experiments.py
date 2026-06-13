@@ -622,13 +622,13 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
         ),
         "num_selected": len(selected_indices),
         "cotrain_sampling": cotrain_info,
-        "norm_stats_path": norm_stats_path,
+        "norm_stats_path": str(norm_stats_path),
         "norm_stats_compute_info": norm_compute_info,
         "swanlab_project": args.swanlab_project,
         "swanlab_run_name": args.swanlab_run_name,
     }
     with open(output_dir / "selected_training_info.json", "w") as f:
-        json.dump(run_info, f, indent=2)
+        json.dump(json_safe(run_info), f, indent=2)
 
     norm_stats = load_norm_stats(config.norm_stats_path)
     metric_logger = TrainingMetricLogger(
