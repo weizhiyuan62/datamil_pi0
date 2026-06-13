@@ -34,6 +34,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dtype", choices=["bfloat16", "float32"], default='float32')
     parser.add_argument("--num-inference-steps", type=int, default=10)
     parser.add_argument("--real-action-dim", type=int, default=7)
+    parser.add_argument(
+        "--mse-space",
+        choices=["raw", "normalized"],
+        default="raw",
+        help="Compute generation MSE in raw LIBERO action space or normalized model action space.",
+    )
     parser.add_argument("--output-path", default=None)
     parser.add_argument("--plot-path", default=None, help="Optional output PNG path for per-horizon-step MSE.")
     return parser.parse_args()
@@ -124,6 +130,13 @@ def unnormalize_actions(actions: np.ndarray, norm_stats, *, action_dim: int) -> 
     return (actions * (std + 1e-6) + mean)[..., :action_dim]
 
 
+def normalize_actions(actions: np.ndarray, norm_stats, *, action_dim: int) -> np.ndarray:
+    stats = norm_stats["actions"]
+    mean = pad_to_dim(stats.mean, actions.shape[-1], value=0.0)
+    std = pad_to_dim(stats.std, actions.shape[-1], value=1.0)
+    return ((actions - mean) / (std + 1e-6))[..., :action_dim]
+
+
 def pad_to_dim(x: np.ndarray, target_dim: int, *, value: float) -> np.ndarray:
     x = np.asarray(x, dtype=np.float32)
     if x.shape[-1] >= target_dim:
@@ -199,6 +212,7 @@ def main() -> None:
     sum_dim_mse = np.zeros((args.real_action_dim,), dtype=np.float64)
     sum_step_dim_mse = np.zeros((config.action_horizon, args.real_action_dim), dtype=np.float64)
     total_chunks = 0
+    max_norm_roundtrip_error = 0.0
     flow_loss_accum: dict[str, float] = {}
     flow_loss_count = 0
 
@@ -222,8 +236,19 @@ def main() -> None:
             raw_flow_losses = model(observation, gt_actions_norm, train=False)
             flow_breakdown = action_loss_breakdown(model, raw_flow_losses)
 
-        pred_actions = unnormalize_actions(pred_actions_norm.detach().cpu().numpy(), norm_stats, action_dim=args.real_action_dim)
-        gt_actions = unnormalize_actions(gt_actions_norm.detach().cpu().numpy(), norm_stats, action_dim=args.real_action_dim)
+        pred_actions_norm_np = pred_actions_norm.detach().cpu().numpy()
+        gt_actions_norm_np = gt_actions_norm.detach().cpu().numpy()
+        pred_actions_raw = unnormalize_actions(pred_actions_norm_np, norm_stats, action_dim=args.real_action_dim)
+        gt_actions_raw = unnormalize_actions(gt_actions_norm_np, norm_stats, action_dim=args.real_action_dim)
+        gt_actions_roundtrip = normalize_actions(gt_actions_raw, norm_stats, action_dim=args.real_action_dim)
+        roundtrip_error = np.max(np.abs(gt_actions_roundtrip - gt_actions_norm_np[..., : args.real_action_dim]))
+        max_norm_roundtrip_error = max(max_norm_roundtrip_error, float(roundtrip_error))
+        if args.mse_space == "raw":
+            pred_actions = pred_actions_raw
+            gt_actions = gt_actions_raw
+        else:
+            pred_actions = pred_actions_norm_np[..., : args.real_action_dim]
+            gt_actions = gt_actions_norm_np[..., : args.real_action_dim]
         mse = (pred_actions - gt_actions) ** 2
 
         batch_chunks = mse.shape[0]
@@ -249,6 +274,10 @@ def main() -> None:
         "real_action_dim": args.real_action_dim,
         "num_chunks": total_chunks,
         "num_inference_steps": args.num_inference_steps,
+        "mse_space": args.mse_space,
+        "normalization_check": {
+            "gt_norm_to_raw_to_norm_max_abs_error": max_norm_roundtrip_error,
+        },
         "noise_mode": "stochastic" if args.stochastic_noise else "deterministic_per_frame",
         "noise_seed": None if args.stochastic_noise else noise_seed,
         "sampled_frame_indices": frame_indices,
