@@ -25,6 +25,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-chunks", type=int, default=128)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--sample-mode",
+        choices=["permutation", "legacy_choice"],
+        default="permutation",
+        help="permutation makes larger num_chunks an extension of the same shuffled pool; legacy_choice reproduces the old rng.choice sampling.",
+    )
     parser.add_argument("--task-indices", nargs="*", type=int, default=None, help="Only sample chunks from these task indices.")
     parser.add_argument("--task-name-contains", default=None, help="Only sample chunks whose prompt contains this substring.")
     parser.add_argument("--task-regex", default=None, help="Only sample chunks whose prompt matches this regex.")
@@ -90,6 +96,7 @@ def select_valid_frame_indices(
     task_indices: list[int] | None = None,
     task_name_contains: str | None = None,
     task_regex: str | None = None,
+    sample_mode: str = "permutation",
 ) -> list[int]:
     from datamil_pi0.dataset.loaders import build_episode_index
 
@@ -115,6 +122,11 @@ def select_valid_frame_indices(
         )
     rng = np.random.default_rng(seed)
     valid_array = np.asarray(valid_frames, dtype=np.int64)
+    if sample_mode == "legacy_choice":
+        replace = len(valid_array) < num_chunks
+        return rng.choice(valid_array, size=num_chunks, replace=replace).astype(int).tolist()
+    if sample_mode != "permutation":
+        raise ValueError(f"Unknown sample_mode={sample_mode!r}")
     if num_chunks <= len(valid_array):
         order = rng.permutation(len(valid_array))[:num_chunks]
         return valid_array[order].astype(int).tolist()
@@ -215,6 +227,32 @@ def deterministic_noise_for_frame_indices(frame_indices, *, shape: tuple[int, ..
     return torch_module.stack(noises, dim=0).to(device)
 
 
+ACTION_GROUPS = {
+    "translation": (0, 3),
+    "rotation": (3, 6),
+    "gripper": (6, 7),
+}
+
+
+def action_group_mse(sum_step_dim_mse: np.ndarray, total_chunks: int, *, real_action_dim: int) -> dict[str, Any]:
+    groups: dict[str, Any] = {}
+    for name, (start, end) in ACTION_GROUPS.items():
+        start = min(start, real_action_dim)
+        end = min(end, real_action_dim)
+        if end <= start:
+            continue
+        curve = sum_step_dim_mse[:, start:end].mean(axis=-1) / max(1, total_chunks)
+        best_idx = int(np.argmin(curve)) if len(curve) else -1
+        groups[name] = {
+            "dims": list(range(start, end)),
+            "mean": float(curve.mean()) if len(curve) else None,
+            "best_horizon_index": best_idx,
+            "best_horizon_mse": float(curve[best_idx]) if best_idx >= 0 else None,
+            "per_horizon_step": curve.tolist(),
+        }
+    return groups
+
+
 def main() -> None:
     args = parse_args()
 
@@ -257,6 +295,7 @@ def main() -> None:
         task_indices=args.task_indices,
         task_name_contains=args.task_name_contains,
         task_regex=args.task_regex,
+        sample_mode=args.sample_mode,
     )
     sampled_task_summary = summarize_sampled_tasks(raw_dataset, frame_indices)
     transform = make_libero_transforms(
@@ -329,6 +368,7 @@ def main() -> None:
 
     per_horizon_step = sum_step_mse / max(1, total_chunks)
     best_horizon_index = int(np.argmin(per_horizon_step)) if len(per_horizon_step) else -1
+    group_mse = action_group_mse(sum_step_dim_mse, total_chunks, real_action_dim=args.real_action_dim)
     summary = {
         "checkpoint_dir": str(checkpoint_dir),
         "norm_stats_path": str(norm_stats_path),
@@ -339,6 +379,7 @@ def main() -> None:
         "num_chunks": total_chunks,
         "num_inference_steps": args.num_inference_steps,
         "mse_space": args.mse_space,
+        "sample_mode": args.sample_mode,
         "normalization_check": {
             "gt_norm_to_raw_to_norm_max_abs_error": max_norm_roundtrip_error,
         },
@@ -358,6 +399,7 @@ def main() -> None:
             "per_horizon_step": per_horizon_step.tolist(),
             "per_action_dim": (sum_dim_mse / max(1, total_chunks)).tolist(),
             "per_horizon_step_action_dim": (sum_step_dim_mse / max(1, total_chunks)).tolist(),
+            "groups": group_mse,
         },
         "teacher_forced_flow_matching_loss_normalized": {
             key: value / max(1, flow_loss_count) for key, value in sorted(flow_loss_accum.items())
