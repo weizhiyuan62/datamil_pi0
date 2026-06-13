@@ -639,7 +639,15 @@ def run_selected_training(args: SelectedTrainingArgs) -> Path:
                 start_time = time.time()
 
             if save_interval > 0 and (global_step % save_interval == 0 or global_step == train_steps):
-                save_pi0_checkpoint(model, optimizer, config, output_dir, global_step, norm_stats=norm_stats)
+                save_pi0_checkpoint(
+                    model,
+                    optimizer,
+                    config,
+                    output_dir,
+                    global_step,
+                    norm_stats=norm_stats,
+                    norm_stats_source_path=norm_stats_path,
+                )
     finally:
         metric_logger.close()
     print(f"Saved selected pi0 checkpoints to {output_dir}")

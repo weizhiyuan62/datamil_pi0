@@ -199,7 +199,15 @@ def make_lr_schedule(config: TrainConfig):
     return lr_schedule
 
 
-def save_pi0_checkpoint(model, optimizer, config: TrainConfig, checkpoint_dir: str | os.PathLike, step: int, norm_stats=None) -> None:
+def save_pi0_checkpoint(
+    model,
+    optimizer,
+    config: TrainConfig,
+    checkpoint_dir: str | os.PathLike,
+    step: int,
+    norm_stats=None,
+    norm_stats_source_path: str | os.PathLike | None = None,
+) -> None:
     ckpt_dir = Path(checkpoint_dir) / str(step)
     tmp_dir = Path(checkpoint_dir) / f"tmp_{step}"
     if tmp_dir.exists():
@@ -210,13 +218,20 @@ def save_pi0_checkpoint(model, optimizer, config: TrainConfig, checkpoint_dir: s
 
     safetensors.torch.save_model(model, tmp_dir / "model.safetensors")
     torch.save(optimizer.state_dict(), tmp_dir / "optimizer.pt")
-    metadata = {"global_step": step, "config": dataclasses.asdict(config)}
+    norm_stats_info = {
+        "asset_id": config.data.asset_id,
+        "source_path": None if norm_stats_source_path is None else str(norm_stats_source_path),
+        "checkpoint_relative_path": f"assets/{config.data.asset_id}/norm_stats.json" if norm_stats is not None else None,
+    }
+    metadata = {"global_step": step, "config": dataclasses.asdict(config), "norm_stats": norm_stats_info}
     torch.save(metadata, tmp_dir / "metadata.pt")
     with open(tmp_dir / "metadata.json", "w") as f:
         json.dump(metadata, f, indent=2, default=str)
 
     if norm_stats is not None:
         save_norm_stats(tmp_dir / "assets" / config.data.asset_id, norm_stats)
+        with open(tmp_dir / "norm_stats_info.json", "w") as f:
+            json.dump(norm_stats_info, f, indent=2, default=str)
 
     if ckpt_dir.exists():
         import shutil
