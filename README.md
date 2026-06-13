@@ -317,10 +317,13 @@ because training and chunk-level checkpoint checks do not need MuJoCo/LIBERO:
 
 ```bash
 uv pip install -e ".[eval]"
-git clone https://github.com/Lifelong-Robot-Learning/LIBERO.git third_party/libero
-uv pip install -e third_party/libero
-export PYTHONPATH=$PYTHONPATH:$PWD/third_party/libero
+git clone https://github.com/Lifelong-Robot-Learning/LIBERO.git third_party/LIBERO
+uv pip install -e third_party/LIBERO
+export PYTHONPATH=$PWD/third_party/LIBERO:$PYTHONPATH
 ```
+
+LIBERO's `setup.py` does not install its `requirements.txt` because `install_requires=[]`; the project's
+`.[eval]` extra installs the runtime packages needed by `scripts/eval_pi0_libero.py`, including `bddl`.
 
 On headless machines, set a MuJoCo backend before running eval, for example:
 
