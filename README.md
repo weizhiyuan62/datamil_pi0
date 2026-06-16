@@ -96,11 +96,12 @@ target episode sets used by that run. The stats are written to:
 
 and the same file is copied into every saved checkpoint for inference.
 
-The default LIBERO pi0 config follows OpenPI's pi0 action layout: actions are normalized before zero-padding
-to the 32-dimensional pi0 action space, and the only intentional model-config difference is
-`action_horizon=15`. The converted LIBERO actions are already delta actions, so `extra_delta_transform=False`
-by default. If you manually enable `--extra-delta-transform`, use the same setting consistently for norm stats,
-DataMIL selection, and selected pi0 training.
+The default LIBERO pi0 config follows OpenPI's pi0 action layout: the first 6 continuous action dimensions
+are normalized before zero-padding to the 32-dimensional pi0 action space, while the gripper dimension is left
+unnormalized via `action_normalization_mask=(True, True, True, True, True, True, False)`. The only intentional
+model-config difference is `action_horizon=15`. The converted LIBERO actions are already delta actions, so
+`extra_delta_transform=False` by default. If you manually enable `--extra-delta-transform`, use the same setting
+consistently for norm stats, DataMIL selection, and selected pi0 training.
 The standalone `scripts/compute_norm_stats_libero.py` remains available for debugging, but it is not required
 for the cotrain commands below.
 

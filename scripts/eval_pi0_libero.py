@@ -70,6 +70,15 @@ def load_model_config(checkpoint_dir: Path, *, dtype_override: str | None) -> Pi
     return config
 
 
+def load_action_normalization_mask(checkpoint_dir: Path) -> list[bool] | None:
+    metadata_path = checkpoint_dir / "metadata.json"
+    if not metadata_path.exists():
+        return None
+    metadata = json.loads(metadata_path.read_text())
+    mask = metadata.get("config", {}).get("data", {}).get("action_normalization_mask")
+    return None if mask is None else [bool(x) for x in mask]
+
+
 def find_norm_stats_path(checkpoint_dir: Path, explicit_path: str | None) -> Path:
     if explicit_path is not None:
         return Path(explicit_path).expanduser().resolve()
@@ -87,7 +96,7 @@ def find_norm_stats_path(checkpoint_dir: Path, explicit_path: str | None) -> Pat
     raise ValueError(f"Multiple norm_stats.json files found; pass --norm-stats-path explicitly: {candidates}")
 
 
-def make_inference_transform(config: Pi0Config, norm_stats):
+def make_inference_transform(config: Pi0Config, norm_stats, *, action_normalization_mask=None):
     from datamil_pi0.tokenizer import PaligemmaTokenizer
     from datamil_pi0.transforms import Compose
     from datamil_pi0.transforms import LiberoInputs
@@ -108,7 +117,7 @@ def make_inference_transform(config: Pi0Config, norm_stats):
                 }
             ),
             LiberoInputs(),
-            Normalize(norm_stats, use_quantiles=False),
+            Normalize(norm_stats, use_quantiles=False, action_normalization_mask=action_normalization_mask),
             ResizeImages(224, 224),
             TokenizePrompt(PaligemmaTokenizer(config.max_token_len), discrete_state_input=config.discrete_state_input),
             PadStatesAndActions(config.action_dim),
@@ -142,8 +151,13 @@ class LocalPi0LiberoPolicy:
 
         self.device = device
         self.config = load_model_config(checkpoint_dir, dtype_override=dtype_override)
+        self.action_normalization_mask = load_action_normalization_mask(checkpoint_dir)
         self.norm_stats = load_norm_stats(norm_stats_path)
-        self.transform = make_inference_transform(self.config, self.norm_stats)
+        self.transform = make_inference_transform(
+            self.config,
+            self.norm_stats,
+            action_normalization_mask=self.action_normalization_mask,
+        )
         self.model = PI0Pytorch(self.config).to(device)
         safetensors.torch.load_model(self.model, checkpoint_dir / "model.safetensors")
         self.model.eval()
@@ -162,17 +176,28 @@ class LocalPi0LiberoPolicy:
         with torch.no_grad():
             actions = self.model.sample_actions(self.device, observation, num_steps=self.num_inference_steps)
         actions = actions.detach().cpu().numpy()[0]
-        actions = unnormalize_actions(actions, self.norm_stats)[:, :7]
+        actions = unnormalize_actions(actions, self.norm_stats, action_normalization_mask=self.action_normalization_mask)[:, :7]
         if self.gripper_conversion == "datamil":
             actions[:, -1] = 1.0 - 2.0 * actions[:, -1]
         return {"actions": actions.astype(np.float32)}
 
 
-def unnormalize_actions(actions: np.ndarray, norm_stats) -> np.ndarray:
+def unnormalize_actions(actions: np.ndarray, norm_stats, *, action_normalization_mask=None) -> np.ndarray:
     stats = norm_stats["actions"]
     mean = pad_to_dim(stats.mean, actions.shape[-1], value=0.0)
     std = pad_to_dim(stats.std, actions.shape[-1], value=1.0)
-    return actions * (std + 1e-6) + mean
+    normalized = actions * (std + 1e-6) + mean
+    if action_normalization_mask is None:
+        return normalized
+    mask = pad_bool_mask(action_normalization_mask, actions.shape[-1])
+    return np.where(mask, normalized, actions)
+
+
+def pad_bool_mask(mask, target_dim: int) -> np.ndarray:
+    mask_array = np.asarray(mask, dtype=bool)
+    if mask_array.shape[-1] >= target_dim:
+        return mask_array[..., :target_dim]
+    return np.pad(mask_array, (0, target_dim - mask_array.shape[-1]), constant_values=False)
 
 
 def pad_to_dim(x: np.ndarray, target_dim: int, *, value: float) -> np.ndarray:

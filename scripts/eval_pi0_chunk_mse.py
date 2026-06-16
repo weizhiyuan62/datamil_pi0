@@ -70,6 +70,15 @@ def load_model_config(checkpoint_dir: Path, *, dtype_override: str | None):
     return Pi0Config(dtype=dtype_override or "bfloat16")
 
 
+def load_action_normalization_mask(checkpoint_dir: Path) -> list[bool] | None:
+    metadata_path = checkpoint_dir / "metadata.json"
+    if not metadata_path.exists():
+        return None
+    metadata = json.loads(metadata_path.read_text())
+    mask = metadata.get("config", {}).get("data", {}).get("action_normalization_mask")
+    return None if mask is None else [bool(x) for x in mask]
+
+
 def find_norm_stats_path(checkpoint_dir: Path, explicit_path: str | None) -> Path:
     if explicit_path is not None:
         return Path(explicit_path).expanduser().resolve()
@@ -195,18 +204,33 @@ def collate(items):
     return tree_map(stack, *items)
 
 
-def unnormalize_actions(actions: np.ndarray, norm_stats, *, action_dim: int) -> np.ndarray:
+def unnormalize_actions(actions: np.ndarray, norm_stats, *, action_dim: int, action_normalization_mask=None) -> np.ndarray:
     stats = norm_stats["actions"]
     mean = pad_to_dim(stats.mean, actions.shape[-1], value=0.0)
     std = pad_to_dim(stats.std, actions.shape[-1], value=1.0)
-    return (actions * (std + 1e-6) + mean)[..., :action_dim]
+    normalized = actions * (std + 1e-6) + mean
+    if action_normalization_mask is None:
+        return normalized[..., :action_dim]
+    mask = pad_bool_mask(action_normalization_mask, actions.shape[-1])
+    return np.where(mask, normalized, actions)[..., :action_dim]
 
 
-def normalize_actions(actions: np.ndarray, norm_stats, *, action_dim: int) -> np.ndarray:
+def normalize_actions(actions: np.ndarray, norm_stats, *, action_dim: int, action_normalization_mask=None) -> np.ndarray:
     stats = norm_stats["actions"]
     mean = pad_to_dim(stats.mean, actions.shape[-1], value=0.0)
     std = pad_to_dim(stats.std, actions.shape[-1], value=1.0)
-    return ((actions - mean) / (std + 1e-6))[..., :action_dim]
+    normalized = (actions - mean) / (std + 1e-6)
+    if action_normalization_mask is None:
+        return normalized[..., :action_dim]
+    mask = pad_bool_mask(action_normalization_mask, actions.shape[-1])
+    return np.where(mask, normalized, actions)[..., :action_dim]
+
+
+def pad_bool_mask(mask, target_dim: int) -> np.ndarray:
+    mask_array = np.asarray(mask, dtype=bool)
+    if mask_array.shape[-1] >= target_dim:
+        return mask_array[..., :target_dim]
+    return np.pad(mask_array, (0, target_dim - mask_array.shape[-1]), constant_values=False)
 
 
 def pad_to_dim(x: np.ndarray, target_dim: int, *, value: float) -> np.ndarray:
@@ -273,6 +297,7 @@ def main() -> None:
     checkpoint_dir = Path(args.checkpoint_dir).expanduser().resolve()
     norm_stats_path = find_norm_stats_path(checkpoint_dir, args.norm_stats_path)
     config = load_model_config(checkpoint_dir, dtype_override=args.dtype)
+    action_normalization_mask = load_action_normalization_mask(checkpoint_dir)
     norm_stats = load_norm_stats(norm_stats_path)
     
     device = torch.device(args.device if torch.cuda.is_available() or args.device == "cpu" else "cpu")
@@ -302,7 +327,7 @@ def main() -> None:
         config,
         norm_stats,
         extra_delta_transform=False,
-        action_normalization_mask=None,
+        action_normalization_mask=action_normalization_mask,
     )
     dataset = ChunkDataset(raw_dataset, transform, frame_indices)
     loader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=0, collate_fn=collate)
@@ -341,9 +366,24 @@ def main() -> None:
 
         pred_actions_norm_np = pred_actions_norm.detach().cpu().numpy()
         gt_actions_norm_np = gt_actions_norm.detach().cpu().numpy()
-        pred_actions_raw = unnormalize_actions(pred_actions_norm_np, norm_stats, action_dim=args.real_action_dim)
-        gt_actions_raw = unnormalize_actions(gt_actions_norm_np, norm_stats, action_dim=args.real_action_dim)
-        gt_actions_roundtrip = normalize_actions(gt_actions_raw, norm_stats, action_dim=args.real_action_dim)
+        pred_actions_raw = unnormalize_actions(
+            pred_actions_norm_np,
+            norm_stats,
+            action_dim=args.real_action_dim,
+            action_normalization_mask=action_normalization_mask,
+        )
+        gt_actions_raw = unnormalize_actions(
+            gt_actions_norm_np,
+            norm_stats,
+            action_dim=args.real_action_dim,
+            action_normalization_mask=action_normalization_mask,
+        )
+        gt_actions_roundtrip = normalize_actions(
+            gt_actions_raw,
+            norm_stats,
+            action_dim=args.real_action_dim,
+            action_normalization_mask=action_normalization_mask,
+        )
         roundtrip_error = np.max(np.abs(gt_actions_roundtrip - gt_actions_norm_np[..., : args.real_action_dim]))
         max_norm_roundtrip_error = max(max_norm_roundtrip_error, float(roundtrip_error))
         if args.mse_space == "raw":
@@ -380,6 +420,7 @@ def main() -> None:
         "num_inference_steps": args.num_inference_steps,
         "mse_space": args.mse_space,
         "sample_mode": args.sample_mode,
+        "action_normalization_mask": action_normalization_mask,
         "normalization_check": {
             "gt_norm_to_raw_to_norm_max_abs_error": max_norm_roundtrip_error,
         },
